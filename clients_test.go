@@ -3,6 +3,7 @@ package cinc
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/tas50/cinc-api/internal/cinctest"
@@ -58,4 +59,17 @@ func TestClients_Update(t *testing.T) {
 	if !updated.Validator {
 		t.Fatalf("Update: expected validator=true, got false")
 	}
+}
+
+func TestClients_Update_Errors(t *testing.T) {
+	t.Run("404_is_ErrNotFound", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("PUT /organizations/o/clients/ghost",
+			cinctest.Route{Status: 404, Body: `{"error":["client 'ghost' not found"]}`})
+		c := newTestClient(t, srv.Server)
+		_, _, err := c.Clients.Update(context.Background(), &APIClient{Name: "ghost"})
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
 }
