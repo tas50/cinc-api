@@ -1,0 +1,32 @@
+name: Dependabot auto-merge
+
+# Auto-merges Dependabot pull requests for non-major version bumps once
+# branch protection's required checks pass. Major-version bumps are left
+# for manual review.
+#
+# Requires:
+#   - Repository setting "Allow auto-merge" enabled.
+#   - Branch protection on `main` with the test check marked required.
+
+on: pull_request_target
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  auto-merge:
+    name: Auto-merge non-major Dependabot PRs
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+
+      - name: Enable auto-merge
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"
