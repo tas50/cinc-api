@@ -1,7 +1,6 @@
 package cinc
 
 // Service type declarations. Methods are added in their own files/tasks.
-type EnvironmentsService struct{ client *Client }
 type ClientsService struct{ client *Client }
 type DataBagsService struct{ client *Client }
 type SearchService struct{ client *Client }
