@@ -82,6 +82,44 @@ func TestCookbooks_Download(t *testing.T) {
 	}
 }
 
+func TestCookbooks_Download_PathTraversal(t *testing.T) {
+	// A malicious server returns a manifest with a path that escapes destDir.
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbooks/evil/1.0.0":
+			if r.Header.Get("X-Ops-Authorization-1") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			baseURL := "http://" + r.Host
+			// The path component traverses up out of destDir.
+			manifest := fmt.Sprintf(`{
+				"cookbook_name":"evil","name":"evil-1.0.0","version":"1.0.0",
+				"root_files":[{"name":"escape.txt","path":"../escape.txt","specificity":"default","checksum":"aaa","url":"%s/files/escape.txt"}]
+			}`, baseURL)
+			w.Write([]byte(manifest))
+		case r.Method == "GET" && r.URL.Path == "/files/escape.txt":
+			w.Write([]byte("pwned\n"))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotImplemented)
+		}
+	})
+
+	c := newTestClient(t, srv.Server)
+	dest := t.TempDir()
+	err := c.Cookbooks.Download(context.Background(), "evil", "1.0.0", dest)
+	if err == nil {
+		t.Fatal("expected error for path traversal, got nil")
+	}
+	// The escaped file must NOT have been written.
+	escapedPath := filepath.Join(filepath.Dir(dest), "escape.txt")
+	if _, statErr := os.Stat(escapedPath); statErr == nil {
+		t.Errorf("path traversal: file was written outside destDir at %s", escapedPath)
+	}
+}
+
 func TestCookbooks_UploadRoundTrip(t *testing.T) {
 	// Build a cookbook on disk: metadata.rb + recipes/default.rb.
 	dir := t.TempDir()

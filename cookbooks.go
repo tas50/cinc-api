@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // CookbookVersion is one version entry in a cookbook list.
@@ -118,7 +119,12 @@ func (s *CookbooksService) Download(ctx context.Context, name, version, destDir 
 		return fmt.Errorf("cinc: get cookbook manifest: %w", err)
 	}
 	for _, ref := range cb.AllFiles() {
-		if err := s.client.downloadFile(ctx, ref.URL, filepath.Join(destDir, filepath.FromSlash(ref.Path))); err != nil {
+		dest := filepath.Join(destDir, filepath.FromSlash(ref.Path))
+		rel, err := filepath.Rel(destDir, dest)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("cinc: unsafe file path in cookbook manifest: %q", ref.Path)
+		}
+		if err := s.client.downloadFile(ctx, ref.URL, dest); err != nil {
 			return fmt.Errorf("cinc: download %s: %w", ref.Path, err)
 		}
 	}
@@ -153,7 +159,6 @@ func (c *Client) downloadFile(ctx context.Context, fileURL, dest string) error {
 	}
 	return nil
 }
-
 
 // uploadCookbook implements the three-step upload, shared with cookbook_artifacts.
 func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbook) error {

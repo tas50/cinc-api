@@ -17,7 +17,7 @@ func TestSandbox_ChecksumNullValues(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("POST /organizations/o/sandboxes", cinctest.Route{
 		Status: 201,
-		Body: `{"sandbox_id":"sb1","checksums":{"` + ck + `":{"needs_upload":false,"url":""}}}`,
+		Body:   `{"sandbox_id":"sb1","checksums":{"` + ck + `":{"needs_upload":false,"url":""}}}`,
 		Assert: func(t *testing.T, r *http.Request, body []byte) {
 			// Decode into a raw map so we can inspect the value type.
 			var req struct {
