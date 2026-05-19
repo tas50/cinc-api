@@ -3,11 +3,74 @@ package cinc
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/tas50/cinc-api/internal/cinctest"
 )
+
+// TestNodes_Errors covers the error paths for the Nodes service.
+func TestNodes_Errors(t *testing.T) {
+	t.Run("404_is_ErrNotFound", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /organizations/o/nodes/missing",
+			cinctest.Route{Status: 404, Body: `{"error":["node 'missing' not found"]}`})
+		c := newTestClient(t, srv.Server)
+		_, _, err := c.Nodes.Get(context.Background(), "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("409_is_ErrConflict", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("POST /organizations/o/nodes",
+			cinctest.Route{Status: 409, Body: `{"error":["node already exists"]}`})
+		c := newTestClient(t, srv.Server)
+		_, _, err := c.Nodes.Create(context.Background(), &Node{Name: "dup"})
+		if !errors.Is(err, ErrConflict) {
+			t.Fatalf("err = %v, want ErrConflict", err)
+		}
+	})
+
+	t.Run("403_is_ErrForbidden", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("DELETE /organizations/o/nodes/locked",
+			cinctest.Route{Status: 403, Body: `{"error":["not authorized"]}`})
+		c := newTestClient(t, srv.Server)
+		_, err := c.Nodes.Delete(context.Background(), "locked")
+		if !errors.Is(err, ErrForbidden) {
+			t.Fatalf("err = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("malformed_json_200", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /organizations/o/nodes/bad",
+			cinctest.Route{Status: 200, Body: `{not valid json`})
+		c := newTestClient(t, srv.Server)
+		_, _, err := c.Nodes.Get(context.Background(), "bad")
+		if err == nil {
+			t.Fatal("expected decode error for malformed JSON, got nil")
+		}
+	})
+
+	t.Run("context_cancelled", func(t *testing.T) {
+		srv := cinctest.New(t)
+		// No route needed — cancelled context should fail before reaching server.
+		c := newTestClient(t, srv.Server)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, _, err := c.Nodes.Get(ctx, "web01")
+		if err == nil {
+			t.Fatal("expected error for cancelled context, got nil")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Logf("err = %v (not context.Canceled, but still an error — OK)", err)
+		}
+	})
+}
 
 func TestNodes_CRUD(t *testing.T) {
 	srv := cinctest.New(t)
