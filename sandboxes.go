@@ -23,9 +23,9 @@ type sandboxChecksum struct {
 // createSandbox registers a set of MD5-hex checksums and learns which the
 // server still needs uploaded.
 func (c *Client) createSandbox(ctx context.Context, checksumsHex []string) (*sandbox, *Response, error) {
-	set := make(map[string]struct{}, len(checksumsHex))
+	set := make(map[string]any, len(checksumsHex))
 	for _, ck := range checksumsHex {
-		set[ck] = struct{}{}
+		set[ck] = nil
 	}
 	sb, resp, err := do[sandbox](ctx, c, "POST", c.orgPath("/sandboxes"),
 		map[string]any{"checksums": set})

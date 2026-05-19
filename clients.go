@@ -7,7 +7,7 @@ import "context"
 type APIClient struct {
 	Name      string  `json:"name"`
 	Validator bool    `json:"validator"`
-	ChefKey   ChefKey `json:"chef_key,omitempty"`
+	ChefKey   ChefKey `json:"chef_key"`
 }
 
 // ChefKey holds key material returned when a client is created.
