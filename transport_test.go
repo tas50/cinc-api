@@ -3,11 +3,78 @@ package cinc
 
 import (
 	"context"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/tas50/cinc-api/internal/signing"
 )
+
+// collectAuthSig reassembles the X-Ops-Authorization-N chunks from an HTTP
+// request into a single base64 string.
+func collectAuthSig(r *http.Request) string {
+	var b strings.Builder
+	for i := 1; ; i++ {
+		chunk := r.Header.Get("X-Ops-Authorization-" + strconv.Itoa(i))
+		if chunk == "" {
+			break
+		}
+		b.WriteString(chunk)
+	}
+	return b.String()
+}
+
+// TestTransport_SigningExcludesQueryString verifies that when a request path
+// contains a query string the signing canonical path is stripped of the "?"
+// and everything after it — i.e. the v1.3 spec requirement.
+func TestTransport_SigningExcludesQueryString(t *testing.T) {
+	const pathOnly = "/organizations/o/search/node"
+	const qs = "q=name%3Aweb01&rows=10&start=0"
+	var (
+		capturedSig       string
+		capturedTimestamp string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedSig = collectAuthSig(r)
+		capturedTimestamp = r.Header.Get("X-Ops-Timestamp")
+		w.Write([]byte(`{"total":0,"start":0,"rows":[]}`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	if _, _, err := do[SearchResult](context.Background(), c, "GET",
+		pathOnly+"?"+qs, nil); err != nil {
+		t.Fatalf("do: %v", err)
+	}
+
+	// Verify the signature against a canonical request built with the path
+	// ONLY (no query string).  If the bug is present the signature was over
+	// path+qs and this will fail.
+	sigBytes, err := base64.StdEncoding.DecodeString(capturedSig)
+	if err != nil {
+		t.Fatalf("decode sig: %v", err)
+	}
+	canonical := signing.CanonicalRequest(signing.Request{
+		Method:    "GET",
+		Path:      pathOnly,
+		Body:      nil,
+		UserID:    "c",
+		Timestamp: capturedTimestamp,
+	})
+	digest := sha256.Sum256([]byte(canonical))
+	key := testRSAKey(t)
+	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], sigBytes); err != nil {
+		t.Errorf("signature does not verify against path-only canonical request: %v\n"+
+			"(this means the query string was included in the signed path)", err)
+	}
+}
 
 func newTestClient(t *testing.T, srv *httptest.Server) *Client {
 	t.Helper()

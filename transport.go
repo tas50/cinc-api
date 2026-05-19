@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/tas50/cinc-api/internal/signing"
 )
@@ -40,8 +41,14 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("cinc: build request: %w", err)
 	}
+	// Strip the query string from the path used for signing only; the v1.3
+	// signing spec requires the canonical path to exclude the query string.
+	signPath := path
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		signPath = path[:i]
+	}
 	hdrs, err := signing.SignHeaders(signing.Request{
-		Method: method, Path: path, Body: body,
+		Method: method, Path: signPath, Body: body,
 		UserID: c.clientName, Timestamp: c.timestamp(),
 	}, c.key)
 	if err != nil {
