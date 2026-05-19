@@ -3,7 +3,9 @@ package cinc
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 )
@@ -20,11 +22,45 @@ type CookbookListEntry struct {
 	Versions []CookbookVersion `json:"versions"`
 }
 
+// CookbookFileRef is one file reference in a cookbook version manifest.
+type CookbookFileRef struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Specificity string `json:"specificity"`
+	Checksum    string `json:"checksum"`
+	URL         string `json:"url"`
+}
+
 // Cookbook is a single cookbook version's manifest as returned by the server.
+// The nine file-segment slices are populated by Get/Download.
 type Cookbook struct {
-	CookbookName string `json:"cookbook_name"`
-	Name         string `json:"name"`
-	Version      string `json:"version"`
+	CookbookName string            `json:"cookbook_name"`
+	Name         string            `json:"name"`
+	Version      string            `json:"version"`
+	Files        []CookbookFileRef `json:"files"`
+	Definitions  []CookbookFileRef `json:"definitions"`
+	Libraries    []CookbookFileRef `json:"libraries"`
+	Attributes   []CookbookFileRef `json:"attributes"`
+	Recipes      []CookbookFileRef `json:"recipes"`
+	Providers    []CookbookFileRef `json:"providers"`
+	Resources    []CookbookFileRef `json:"resources"`
+	RootFiles    []CookbookFileRef `json:"root_files"`
+	Templates    []CookbookFileRef `json:"templates"`
+}
+
+// AllFiles flattens all nine file-segment slices into a single slice.
+func (cb *Cookbook) AllFiles() []CookbookFileRef {
+	all := make([]CookbookFileRef, 0,
+		len(cb.Files)+len(cb.Definitions)+len(cb.Libraries)+
+			len(cb.Attributes)+len(cb.Recipes)+len(cb.Providers)+
+			len(cb.Resources)+len(cb.RootFiles)+len(cb.Templates))
+	for _, seg := range [][]CookbookFileRef{
+		cb.Files, cb.Definitions, cb.Libraries, cb.Attributes,
+		cb.Recipes, cb.Providers, cb.Resources, cb.RootFiles, cb.Templates,
+	} {
+		all = append(all, seg...)
+	}
+	return all
 }
 
 // cookbookFile is one file belonging to a cookbook being uploaded.
@@ -71,6 +107,53 @@ func (s *CookbooksService) Delete(ctx context.Context, name, version string) (*R
 func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook) error {
 	return uploadCookbook(ctx, s.client, "/cookbooks", cb)
 }
+
+// Download fetches a cookbook version manifest and writes every file in all
+// nine segments to destDir, recreating the path hierarchy. version may be the
+// literal string "_latest". File content is fetched from pre-signed bookshelf
+// URLs using a plain (unsigned) HTTP GET, matching the upload path in sandboxes.go.
+func (s *CookbooksService) Download(ctx context.Context, name, version, destDir string) error {
+	cb, _, err := s.Get(ctx, name, version)
+	if err != nil {
+		return fmt.Errorf("cinc: get cookbook manifest: %w", err)
+	}
+	for _, ref := range cb.AllFiles() {
+		if err := s.client.downloadFile(ctx, ref.URL, filepath.Join(destDir, filepath.FromSlash(ref.Path))); err != nil {
+			return fmt.Errorf("cinc: download %s: %w", ref.Path, err)
+		}
+	}
+	return nil
+}
+
+// downloadFile GETs a pre-signed bookshelf URL (no Chef signing) and writes
+// the body to dest, creating parent directories as needed.
+func (c *Client) downloadFile(ctx context.Context, fileURL, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
+	if err != nil {
+		return fmt.Errorf("cinc: build download request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("cinc: fetch file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return newErrorResponse("GET", fileURL, resp.StatusCode, body)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("cinc: read file body: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("cinc: create dirs: %w", err)
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		return fmt.Errorf("cinc: write file: %w", err)
+	}
+	return nil
+}
+
 
 // uploadCookbook implements the three-step upload, shared with cookbook_artifacts.
 func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbook) error {

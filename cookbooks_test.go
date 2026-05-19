@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,6 +33,52 @@ func TestCookbooks_GetAndList(t *testing.T) {
 	}
 	if _, err := c.Cookbooks.Delete(ctx, "nginx", "1.2.0"); err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+}
+
+func TestCookbooks_Download(t *testing.T) {
+	// The fake server doubles as: (a) the Chef API endpoint that returns the
+	// manifest, and (b) the "bookshelf" that serves the pre-signed file URLs.
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbooks/nginx/1.2.0":
+			// Chef-signed request — must carry auth header.
+			if r.Header.Get("X-Ops-Authorization-1") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			baseURL := "http://" + r.Host
+			manifest := fmt.Sprintf(`{
+				"cookbook_name":"nginx","name":"nginx-1.2.0","version":"1.2.0",
+				"recipes":[{"name":"default.rb","path":"recipes/default.rb","specificity":"default","checksum":"abc","url":"%s/files/recipes/default.rb"}],
+				"root_files":[{"name":"metadata.rb","path":"metadata.rb","specificity":"default","checksum":"def","url":"%s/files/metadata.rb"}]
+			}`, baseURL, baseURL)
+			w.Write([]byte(manifest))
+		case r.Method == "GET" && r.URL.Path == "/files/recipes/default.rb":
+			// Bookshelf: plain unsigned request.
+			w.Write([]byte("package 'nginx'\n"))
+		case r.Method == "GET" && r.URL.Path == "/files/metadata.rb":
+			w.Write([]byte("name 'nginx'\nversion '1.2.0'\n"))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotImplemented)
+		}
+	})
+
+	c := newTestClient(t, srv.Server)
+	dest := t.TempDir()
+	if err := c.Cookbooks.Download(context.Background(), "nginx", "1.2.0", dest); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	recipe := filepath.Join(dest, "recipes", "default.rb")
+	if data, err := os.ReadFile(recipe); err != nil || string(data) != "package 'nginx'\n" {
+		t.Fatalf("recipe file: data=%q err=%v", data, err)
+	}
+	metadata := filepath.Join(dest, "metadata.rb")
+	if data, err := os.ReadFile(metadata); err != nil || string(data) != "name 'nginx'\nversion '1.2.0'\n" {
+		t.Fatalf("metadata file: data=%q err=%v", data, err)
 	}
 }
 
