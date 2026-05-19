@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +29,13 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([
 }
 
 func isNetErr(err error) bool {
-	return err != nil
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return true
 }
 
 func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {

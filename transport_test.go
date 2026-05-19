@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tas50/cinc-api/internal/signing"
@@ -129,5 +130,88 @@ func TestDo_ContextCancelled(t *testing.T) {
 	type obj struct{}
 	if _, _, err := do[obj](ctx, c, "GET", "/x", nil); err == nil {
 		t.Fatal("expected context error")
+	}
+}
+
+// TestRetry_503ThenSuccess asserts that a GET retried on 503 eventually
+// succeeds and that the server is hit exactly 3 times (2 failures + 1 success).
+func TestRetry_503ThenSuccess(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		if n < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"name":"ok"}`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{ Name string }
+	got, _, err := do[obj](context.Background(), c, "GET", "/nodes/x", nil)
+	if err != nil {
+		t.Fatalf("expected success after retries, got: %v", err)
+	}
+	if got.Name != "ok" {
+		t.Fatalf("unexpected body: %+v", got)
+	}
+	if n := hits.Load(); n != 3 {
+		t.Fatalf("server hit %d times, want 3", n)
+	}
+}
+
+// TestRetry_ContextCancelledNoRetry asserts that a cancelled context causes
+// exactly one attempt (no retries) — validates the isNetErr fix for Issue 3.
+func TestRetry_ContextCancelledNoRetry(t *testing.T) {
+	var hits atomic.Int32
+	// Use a channel to synchronise: the handler blocks until the client
+	// has cancelled the context, ensuring the cancellation is observed.
+	ready := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		close(ready) // signal we're in the handler
+		// Block until the request context is cancelled (client gone).
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		type obj struct{}
+		_, _, err := do[obj](ctx, c, "GET", "/nodes/x", nil)
+		done <- err
+	}()
+
+	<-ready  // wait until the handler is entered
+	cancel() // cancel only after the first request is in-flight
+
+	err := <-done
+	if err == nil {
+		t.Fatal("expected error after context cancel")
+	}
+	// Give any spurious retry a moment to arrive, then check.
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("server hit %d times after context cancel, want 1 (no retries)", n)
+	}
+}
+
+// TestRetry_PostNot retried asserts that a non-GET (POST) 503 is never retried.
+func TestRetry_PostNotRetried(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{}
+	_, _, err := do[obj](context.Background(), c, "POST", "/nodes", map[string]any{"name": "x"})
+	if err == nil {
+		t.Fatal("expected error for 503")
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("POST hit %d times, want exactly 1 (must not retry non-GET)", n)
 	}
 }
