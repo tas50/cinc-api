@@ -60,20 +60,24 @@ func (s *SearchService) Query(ctx context.Context, index, query string, opts ...
 }
 
 // SearchAll pages through every result, returning all rows.
+// WithStart(n) is respected as the absolute offset of the first row to fetch;
+// subsequent pages advance the offset by the number of rows received per page.
 func (s *SearchService) SearchAll(ctx context.Context, index, query string, opts ...SearchOption) ([]json.RawMessage, error) {
 	p := searchParams{rows: 1000}
 	for _, o := range opts {
 		o(&p)
 	}
 	var all []json.RawMessage
+	offset := p.start
 	for {
 		res, _, err := s.Query(ctx, index, query,
-			WithStart(p.start+len(all)), WithRows(p.rows), WithPartial(p.partial))
+			WithStart(offset), WithRows(p.rows), WithPartial(p.partial))
 		if err != nil {
 			return nil, err
 		}
 		all = append(all, res.Rows...)
-		if len(res.Rows) == 0 || len(all) >= res.Total {
+		offset += len(res.Rows)
+		if len(res.Rows) == 0 || offset >= res.Total {
 			return all, nil
 		}
 	}
