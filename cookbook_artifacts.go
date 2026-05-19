@@ -1,6 +1,9 @@
 package cinc
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // CookbookArtifactVersion is one identifier entry in an artifact list.
 type CookbookArtifactVersion struct {
@@ -36,4 +39,17 @@ func (s *CookbookArtifactsService) Delete(ctx context.Context, name, identifier 
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
 		s.client.orgPath("/cookbook_artifacts/"+name+"/"+identifier), nil)
 	return resp, err
+}
+
+// Upload uploads a LocalCookbook as a cookbook artifact using the
+// sandbox/checksum protocol, then PUTs the artifact manifest at
+// PUT /organizations/NAME/cookbook_artifacts/NAME/IDENTIFIER.
+func (s *CookbookArtifactsService) Upload(ctx context.Context, cb *LocalCookbook, identifier string) error {
+	// Work on a shallow copy so the caller's struct is not mutated.
+	copy := *cb
+	copy.Identifier = identifier
+	if err := uploadCookbook(ctx, s.client, "/cookbook_artifacts", &copy); err != nil {
+		return fmt.Errorf("cinc: upload cookbook artifact: %w", err)
+	}
+	return nil
 }

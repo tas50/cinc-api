@@ -35,10 +35,13 @@ type cookbookFile struct {
 }
 
 // LocalCookbook is a cookbook assembled from disk, ready to upload.
+// When Identifier is set the manifest is emitted as a cookbook artifact
+// version (chef_type "cookbook_artifact_version") rather than a plain version.
 type LocalCookbook struct {
-	Name    string
-	Version string
-	files   []cookbookFile
+	Name       string
+	Version    string
+	Identifier string // set for cookbook artifact uploads
+	files      []cookbookFile
 }
 
 // CookbooksService accesses the /cookbooks endpoints.
@@ -92,8 +95,13 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 		return fmt.Errorf("cinc: commit sandbox: %w", err)
 	}
 	manifest := cookbookManifest(cb)
+	// Use Identifier for artifact uploads; Version for regular cookbooks.
+	slug := cb.Version
+	if cb.Identifier != "" {
+		slug = cb.Identifier
+	}
 	_, _, err = do[map[string]any](ctx, c, "PUT",
-		c.orgPath(base+"/"+cb.Name+"/"+cb.Version), manifest)
+		c.orgPath(base+"/"+cb.Name+"/"+slug), manifest)
 	if err != nil {
 		return fmt.Errorf("cinc: put cookbook manifest: %w", err)
 	}
@@ -101,6 +109,8 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 }
 
 // cookbookManifest builds the version manifest body for an upload.
+// When cb.Identifier is set it emits a cookbook artifact manifest
+// (chef_type "cookbook_artifact_version"); otherwise a plain version manifest.
 func cookbookManifest(cb *LocalCookbook) map[string]any {
 	all := make([]map[string]any, 0, len(cb.files))
 	for _, f := range cb.files {
@@ -108,6 +118,15 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 			"name": filepath.Base(f.name), "path": f.name,
 			"checksum": f.checksum, "specificity": "default",
 		})
+	}
+	if cb.Identifier != "" {
+		return map[string]any{
+			"cookbook_name": cb.Name,
+			"name":          cb.Name,
+			"identifier":    cb.Identifier,
+			"all_files":     all,
+			"chef_type":     "cookbook_artifact_version",
+		}
 	}
 	return map[string]any{
 		"cookbook_name": cb.Name,
