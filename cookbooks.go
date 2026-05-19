@@ -3,9 +3,12 @@ package cinc
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // CookbookVersion is one version entry in a cookbook list.
@@ -20,11 +23,45 @@ type CookbookListEntry struct {
 	Versions []CookbookVersion `json:"versions"`
 }
 
+// CookbookFileRef is one file reference in a cookbook version manifest.
+type CookbookFileRef struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Specificity string `json:"specificity"`
+	Checksum    string `json:"checksum"`
+	URL         string `json:"url"`
+}
+
 // Cookbook is a single cookbook version's manifest as returned by the server.
+// The nine file-segment slices are populated by Get/Download.
 type Cookbook struct {
-	CookbookName string `json:"cookbook_name"`
-	Name         string `json:"name"`
-	Version      string `json:"version"`
+	CookbookName string            `json:"cookbook_name"`
+	Name         string            `json:"name"`
+	Version      string            `json:"version"`
+	Files        []CookbookFileRef `json:"files"`
+	Definitions  []CookbookFileRef `json:"definitions"`
+	Libraries    []CookbookFileRef `json:"libraries"`
+	Attributes   []CookbookFileRef `json:"attributes"`
+	Recipes      []CookbookFileRef `json:"recipes"`
+	Providers    []CookbookFileRef `json:"providers"`
+	Resources    []CookbookFileRef `json:"resources"`
+	RootFiles    []CookbookFileRef `json:"root_files"`
+	Templates    []CookbookFileRef `json:"templates"`
+}
+
+// AllFiles flattens all nine file-segment slices into a single slice.
+func (cb *Cookbook) AllFiles() []CookbookFileRef {
+	all := make([]CookbookFileRef, 0,
+		len(cb.Files)+len(cb.Definitions)+len(cb.Libraries)+
+			len(cb.Attributes)+len(cb.Recipes)+len(cb.Providers)+
+			len(cb.Resources)+len(cb.RootFiles)+len(cb.Templates))
+	for _, seg := range [][]CookbookFileRef{
+		cb.Files, cb.Definitions, cb.Libraries, cb.Attributes,
+		cb.Recipes, cb.Providers, cb.Resources, cb.RootFiles, cb.Templates,
+	} {
+		all = append(all, seg...)
+	}
+	return all
 }
 
 // cookbookFile is one file belonging to a cookbook being uploaded.
@@ -35,10 +72,13 @@ type cookbookFile struct {
 }
 
 // LocalCookbook is a cookbook assembled from disk, ready to upload.
+// When Identifier is set the manifest is emitted as a cookbook artifact
+// version (chef_type "cookbook_artifact_version") rather than a plain version.
 type LocalCookbook struct {
-	Name    string
-	Version string
-	files   []cookbookFile
+	Name       string
+	Version    string
+	Identifier string // set for cookbook artifact uploads
+	files      []cookbookFile
 }
 
 // CookbooksService accesses the /cookbooks endpoints.
@@ -69,6 +109,57 @@ func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook) error 
 	return uploadCookbook(ctx, s.client, "/cookbooks", cb)
 }
 
+// Download fetches a cookbook version manifest and writes every file in all
+// nine segments to destDir, recreating the path hierarchy. version may be the
+// literal string "_latest". File content is fetched from pre-signed bookshelf
+// URLs using a plain (unsigned) HTTP GET, matching the upload path in sandboxes.go.
+func (s *CookbooksService) Download(ctx context.Context, name, version, destDir string) error {
+	cb, _, err := s.Get(ctx, name, version)
+	if err != nil {
+		return fmt.Errorf("cinc: get cookbook manifest: %w", err)
+	}
+	for _, ref := range cb.AllFiles() {
+		dest := filepath.Join(destDir, filepath.FromSlash(ref.Path))
+		rel, err := filepath.Rel(destDir, dest)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("cinc: unsafe file path in cookbook manifest: %q", ref.Path)
+		}
+		if err := s.client.downloadFile(ctx, ref.URL, dest); err != nil {
+			return fmt.Errorf("cinc: download %s: %w", ref.Path, err)
+		}
+	}
+	return nil
+}
+
+// downloadFile GETs a pre-signed bookshelf URL (no Chef signing) and writes
+// the body to dest, creating parent directories as needed.
+func (c *Client) downloadFile(ctx context.Context, fileURL, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
+	if err != nil {
+		return fmt.Errorf("cinc: build download request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("cinc: fetch file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return newErrorResponse("GET", fileURL, resp.StatusCode, body)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("cinc: read file body: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("cinc: create dirs: %w", err)
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		return fmt.Errorf("cinc: write file: %w", err)
+	}
+	return nil
+}
+
 // uploadCookbook implements the three-step upload, shared with cookbook_artifacts.
 func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbook) error {
 	hexes := make([]string, 0, len(cb.files))
@@ -92,8 +183,13 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 		return fmt.Errorf("cinc: commit sandbox: %w", err)
 	}
 	manifest := cookbookManifest(cb)
+	// Use Identifier for artifact uploads; Version for regular cookbooks.
+	slug := cb.Version
+	if cb.Identifier != "" {
+		slug = cb.Identifier
+	}
 	_, _, err = do[map[string]any](ctx, c, "PUT",
-		c.orgPath(base+"/"+cb.Name+"/"+cb.Version), manifest)
+		c.orgPath(base+"/"+cb.Name+"/"+slug), manifest)
 	if err != nil {
 		return fmt.Errorf("cinc: put cookbook manifest: %w", err)
 	}
@@ -101,6 +197,8 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 }
 
 // cookbookManifest builds the version manifest body for an upload.
+// When cb.Identifier is set it emits a cookbook artifact manifest
+// (chef_type "cookbook_artifact_version"); otherwise a plain version manifest.
 func cookbookManifest(cb *LocalCookbook) map[string]any {
 	all := make([]map[string]any, 0, len(cb.files))
 	for _, f := range cb.files {
@@ -109,11 +207,21 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 			"checksum": f.checksum, "specificity": "default",
 		})
 	}
+	if cb.Identifier != "" {
+		return map[string]any{
+			"cookbook_name": cb.Name,
+			"name":          cb.Name,
+			"identifier":    cb.Identifier,
+			"all_files":     all,
+			"chef_type":     "cookbook_artifact_version",
+		}
+	}
 	return map[string]any{
 		"cookbook_name": cb.Name,
 		"name":          cb.Name + "-" + cb.Version,
 		"version":       cb.Version,
 		"all_files":     all,
+		"chef_type":     "cookbook_version",
 	}
 }
 

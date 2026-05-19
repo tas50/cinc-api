@@ -37,6 +37,12 @@ func (s *ClientsService) Create(ctx context.Context, cl *APIClient) (*APIClient,
 	return ptrOrNil(created, err), resp, err
 }
 
+// Update replaces an existing client.
+func (s *ClientsService) Update(ctx context.Context, cl *APIClient) (*APIClient, *Response, error) {
+	updated, resp, err := s.res().update(ctx, cl.Name, cl)
+	return ptrOrNil(updated, err), resp, err
+}
+
 // Delete removes a client by name.
 func (s *ClientsService) Delete(ctx context.Context, name string) (*Response, error) {
 	return s.res().remove(ctx, name)
