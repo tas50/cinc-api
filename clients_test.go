@@ -37,3 +37,25 @@ func TestClients_CRUD(t *testing.T) {
 		t.Fatalf("List: %+v %v", names, err)
 	}
 }
+
+func TestClients_Update(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("PUT /organizations/o/clients/monkeypants",
+		cinctest.Route{
+			Body: `{"name":"monkeypants","clientname":"monkeypants","validator":true,"json_class":"Chef::ApiClient","chef_type":"client"}`,
+		})
+
+	c := newTestClient(t, srv.Server)
+	ctx := context.Background()
+
+	updated, _, err := c.Clients.Update(ctx, &APIClient{Name: "monkeypants", Validator: true})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Name != "monkeypants" {
+		t.Fatalf("Update: expected name=monkeypants, got %q", updated.Name)
+	}
+	if !updated.Validator {
+		t.Fatalf("Update: expected validator=true, got false")
+	}
+}
