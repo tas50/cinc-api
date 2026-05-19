@@ -221,6 +221,7 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 		"name":          cb.Name + "-" + cb.Version,
 		"version":       cb.Version,
 		"all_files":     all,
+		"chef_type":     "cookbook_version",
 	}
 }
 

@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -124,10 +125,10 @@ func TestCookbooks_UploadRoundTrip(t *testing.T) {
 	// Build a cookbook on disk: metadata.rb + recipes/default.rb.
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "nginx", "recipes"), 0o755)
-	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"),
-		[]byte("name 'nginx'\nversion '1.2.0'\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "nginx", "recipes", "default.rb"),
-		[]byte("package 'nginx'\n"), 0o644)
+	metadataContent := []byte("name 'nginx'\nversion '1.2.0'\n")
+	recipeContent := []byte("package 'nginx'\n")
+	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"), metadataContent, 0o644)
+	os.WriteFile(filepath.Join(dir, "nginx", "recipes", "default.rb"), recipeContent, 0o644)
 
 	cb, err := cookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
 	if err != nil {
@@ -137,26 +138,58 @@ func TestCookbooks_UploadRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 files, got %d", len(cb.files))
 	}
 
+	// Pick the checksum of metadata.rb as the one needing upload.
+	metadataChecksum := md5Hex(metadataContent)
+
 	// Stateful fake: sandbox -> file PUT -> manifest PUT.
 	srv := cinctest.New(t)
 	uploaded := map[string][]byte{}
+	var manifestBody []byte
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			// Return metadata.rb as needing upload; recipes/default.rb does not.
+			uploadURL := "http://" + r.Host + "/upload/" + metadataChecksum
 			w.WriteHeader(201)
-			w.Write([]byte(`{"sandbox_id":"sb1","checksums":{}}`))
+			w.Write([]byte(`{"sandbox_id":"sb1","checksums":{"` + metadataChecksum + `":{"needs_upload":true,"url":"` + uploadURL + `"}}}`))
+		case r.Method == "PUT" && r.URL.Path == "/upload/"+metadataChecksum:
+			// Pre-signed bookshelf upload — must NOT carry Chef signing header.
+			if r.Header.Get("X-Ops-Authorization-1") != "" {
+				t.Errorf("file upload PUT carried Chef signing header (should be unsigned)")
+			}
+			body, _ := io.ReadAll(r.Body)
+			uploaded[metadataChecksum] = body
+			w.WriteHeader(200)
 		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb1":
 			w.Write([]byte(`{}`))
 		case r.Method == "PUT" && r.URL.Path == "/organizations/o/cookbooks/nginx/1.2.0":
+			manifestBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(201)
 			w.Write([]byte(`{}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		_ = uploaded
 	})
 	c := newTestClient(t, srv.Server)
 	if err := c.Cookbooks.Upload(context.Background(), cb); err != nil {
 		t.Fatalf("Upload: %v", err)
+	}
+
+	// Issue 3: verify the file-upload PUT was exercised.
+	got, ok := uploaded[metadataChecksum]
+	if !ok {
+		t.Fatal("expected metadata.rb to be uploaded, but no PUT was received")
+	}
+	if string(got) != string(metadataContent) {
+		t.Errorf("uploaded metadata.rb = %q, want %q", got, metadataContent)
+	}
+
+	// Issue 2: verify manifest includes chef_type "cookbook_version".
+	if len(manifestBody) == 0 {
+		t.Fatal("no manifest body received")
+	}
+	body := string(manifestBody)
+	if !contains(body, "cookbook_version") {
+		t.Errorf("manifest missing chef_type=cookbook_version: %s", body)
 	}
 }

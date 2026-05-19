@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,10 +34,10 @@ func TestCookbookArtifacts_UploadRoundTrip(t *testing.T) {
 	// Build a cookbook on disk: metadata.rb + recipes/default.rb.
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "nginx", "recipes"), 0o755)
-	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"),
-		[]byte("name 'nginx'\nversion '1.2.0'\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "nginx", "recipes", "default.rb"),
-		[]byte("package 'nginx'\n"), 0o644)
+	metadataContent := []byte("name 'nginx'\nversion '1.2.0'\n")
+	recipeContent := []byte("package 'nginx'\n")
+	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"), metadataContent, 0o644)
+	os.WriteFile(filepath.Join(dir, "nginx", "recipes", "default.rb"), recipeContent, 0o644)
 
 	cb, err := cookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
 	if err != nil {
@@ -45,19 +46,30 @@ func TestCookbookArtifacts_UploadRoundTrip(t *testing.T) {
 
 	const identifier = "abc1234567890abcdef1234567890abcdef12345"
 
+	// Pick recipes/default.rb as the one needing upload.
+	recipeChecksum := md5Hex(recipeContent)
+
 	var manifestBody []byte
+	uploaded := map[string][]byte{}
 	srv := cinctest.New(t)
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			uploadURL := "http://" + r.Host + "/upload/" + recipeChecksum
 			w.WriteHeader(201)
-			w.Write([]byte(`{"sandbox_id":"sb2","checksums":{}}`))
+			w.Write([]byte(`{"sandbox_id":"sb2","checksums":{"` + recipeChecksum + `":{"needs_upload":true,"url":"` + uploadURL + `"}}}`))
+		case r.Method == "PUT" && r.URL.Path == "/upload/"+recipeChecksum:
+			// Pre-signed bookshelf upload — must NOT carry Chef signing header.
+			if r.Header.Get("X-Ops-Authorization-1") != "" {
+				t.Errorf("file upload PUT carried Chef signing header (should be unsigned)")
+			}
+			body, _ := io.ReadAll(r.Body)
+			uploaded[recipeChecksum] = body
+			w.WriteHeader(200)
 		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb2":
 			w.Write([]byte(`{}`))
 		case r.Method == "PUT" && r.URL.Path == "/organizations/o/cookbook_artifacts/nginx/"+identifier:
-			body := make([]byte, r.ContentLength)
-			r.Body.Read(body)
-			manifestBody = body
+			manifestBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(200)
 			w.Write([]byte(`{}`))
 		default:
@@ -69,6 +81,16 @@ func TestCookbookArtifacts_UploadRoundTrip(t *testing.T) {
 	if err := c.CookbookArtifacts.Upload(context.Background(), cb, identifier); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
+
+	// Issue 3: verify the file-upload PUT was exercised.
+	got, ok := uploaded[recipeChecksum]
+	if !ok {
+		t.Fatal("expected recipes/default.rb to be uploaded, but no PUT was received")
+	}
+	if string(got) != string(recipeContent) {
+		t.Errorf("uploaded recipes/default.rb = %q, want %q", got, recipeContent)
+	}
+
 	// Verify manifest was sent and contains identifier + correct chef_type.
 	if len(manifestBody) == 0 {
 		t.Fatal("no manifest body received")
