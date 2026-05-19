@@ -57,9 +57,16 @@ func TestCookbooks_Download(t *testing.T) {
 			}`, baseURL, baseURL)
 			w.Write([]byte(manifest))
 		case r.Method == "GET" && r.URL.Path == "/files/recipes/default.rb":
-			// Bookshelf: plain unsigned request.
+			// Bookshelf: pre-signed URL — must NOT carry Chef signing header.
+			if r.Header.Get("X-Ops-Authorization-1") != "" {
+				t.Errorf("bookshelf GET /files/recipes/default.rb carried Chef signing header (should be unsigned)")
+			}
 			w.Write([]byte("package 'nginx'\n"))
 		case r.Method == "GET" && r.URL.Path == "/files/metadata.rb":
+			// Bookshelf: pre-signed URL — must NOT carry Chef signing header.
+			if r.Header.Get("X-Ops-Authorization-1") != "" {
+				t.Errorf("bookshelf GET /files/metadata.rb carried Chef signing header (should be unsigned)")
+			}
 			w.Write([]byte("name 'nginx'\nversion '1.2.0'\n"))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
