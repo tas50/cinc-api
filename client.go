@@ -33,6 +33,8 @@ type Client struct {
 	Groups            *GroupsService
 	Status            *StatusService
 	License           *LicenseService
+	Policies          *PoliciesService
+	PolicyGroups      *PolicyGroupsService
 }
 
 // NewClient builds a Client from cfg and optional Options.
@@ -70,6 +72,8 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	c.Groups = &GroupsService{client: c}
 	c.Status = &StatusService{client: c}
 	c.License = &LicenseService{client: c}
+	c.Policies = &PoliciesService{client: c}
+	c.PolicyGroups = &PolicyGroupsService{client: c}
 	return c, nil
 }
 
