@@ -38,6 +38,7 @@ following endpoint families are implemented:
 | `c.PolicyGroups`      | `/policy_groups`                              | List / Get / Delete / GetPolicy / PutPolicy / DeletePolicy |
 | `c.Status`             | `/_status`                                    | Get (server health + keygen pool)                       |
 | `c.License`            | `/license`                                    | Get (node-license usage)                                |
+| `c.Orgs`               | `/organizations` (top-level)                  | List / Get / Create / Update / Delete                   |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`. Idempotent GETs
