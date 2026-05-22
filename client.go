@@ -31,6 +31,8 @@ type Client struct {
 	CookbookArtifacts *CookbookArtifactsService
 	Keys              *KeysService
 	Groups            *GroupsService
+	Status            *StatusService
+	License           *LicenseService
 }
 
 // NewClient builds a Client from cfg and optional Options.
@@ -66,6 +68,8 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	c.CookbookArtifacts = &CookbookArtifactsService{client: c}
 	c.Keys = &KeysService{client: c}
 	c.Groups = &GroupsService{client: c}
+	c.Status = &StatusService{client: c}
+	c.License = &LicenseService{client: c}
 	return c, nil
 }
 
