@@ -87,7 +87,8 @@ func TestNewClient_WiresAllServices(t *testing.T) {
 		c.Clients == nil || c.DataBags == nil || c.Search == nil ||
 		c.Cookbooks == nil || c.CookbookArtifacts == nil ||
 		c.Keys == nil || c.Groups == nil ||
-		c.Status == nil || c.License == nil {
+		c.Status == nil || c.License == nil ||
+		c.Policies == nil || c.PolicyGroups == nil {
 		t.Fatal("at least one service is unwired")
 	}
 }
