@@ -29,6 +29,8 @@ type Client struct {
 	Search            *SearchService
 	Cookbooks         *CookbooksService
 	CookbookArtifacts *CookbookArtifactsService
+	Keys              *KeysService
+	Groups            *GroupsService
 }
 
 // NewClient builds a Client from cfg and optional Options.
@@ -62,6 +64,8 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	c.Search = &SearchService{client: c}
 	c.Cookbooks = &CookbooksService{client: c}
 	c.CookbookArtifacts = &CookbookArtifactsService{client: c}
+	c.Keys = &KeysService{client: c}
+	c.Groups = &GroupsService{client: c}
 	return c, nil
 }
 
