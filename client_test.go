@@ -2,6 +2,7 @@
 package cinc
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -44,5 +45,84 @@ func TestClient_now(t *testing.T) {
 	c.clock = func() time.Time { return time.Unix(0, 0).UTC() }
 	if got := strings.TrimSpace(c.timestamp()); got != "1970-01-01T00:00:00Z" {
 		t.Fatalf("timestamp = %q", got)
+	}
+}
+
+func TestNewClient_TrimsTrailingSlash(t *testing.T) {
+	c, err := NewClient(Config{
+		ServerURL: "https://chef.example.com/", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.baseURL.String(); got != "https://chef.example.com" {
+		t.Fatalf("baseURL = %q, want trailing slash trimmed", got)
+	}
+}
+
+func TestNewClient_OrgPathHandlesLeadingSlash(t *testing.T) {
+	c, _ := NewClient(Config{
+		ServerURL: "https://h", Org: "myorg",
+		ClientName: "c", Key: testRSAKey(t),
+	})
+	// Either form should yield the same canonical path.
+	if got := c.orgPath("nodes"); got != "/organizations/myorg/nodes" {
+		t.Errorf("orgPath(no slash) = %q", got)
+	}
+	if got := c.orgPath("/nodes"); got != "/organizations/myorg/nodes" {
+		t.Errorf("orgPath(slash) = %q", got)
+	}
+}
+
+func TestNewClient_WiresAllServices(t *testing.T) {
+	c, err := NewClient(Config{
+		ServerURL: "https://h", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Nodes == nil || c.Roles == nil || c.Environments == nil ||
+		c.Clients == nil || c.DataBags == nil || c.Search == nil ||
+		c.Cookbooks == nil || c.CookbookArtifacts == nil {
+		t.Fatal("at least one service is unwired")
+	}
+}
+
+func TestNewClient_SkipTLSVerify(t *testing.T) {
+	c, err := NewClient(Config{
+		ServerURL: "https://h", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	}, WithSkipTLSVerify(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := c.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", c.httpClient.Transport)
+	}
+	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify not enabled by WithSkipTLSVerify(true)")
+	}
+}
+
+func TestNewClient_SkipTLSVerify_PreservesTimeout(t *testing.T) {
+	custom := &http.Client{Timeout: 99 * time.Second}
+	c, err := NewClient(Config{
+		ServerURL: "https://h", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	}, WithHTTPClient(custom), WithSkipTLSVerify(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The httpClient is replaced when skipTLSVerify is set; the timeout
+	// must still match the original custom client's timeout.
+	if c.httpClient.Timeout != 99*time.Second {
+		t.Fatalf("timeout = %v, want 99s", c.httpClient.Timeout)
+	}
+	// Sanity check: the resulting Transport really does skip verification.
+	if cfg := c.httpClient.Transport.(*http.Transport).TLSClientConfig; cfg == nil || !cfg.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify not enabled")
 	}
 }

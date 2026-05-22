@@ -19,6 +19,49 @@ func TestAttributes_DigAndGet(t *testing.T) {
 	}
 }
 
+func TestAttributes_Dig_EmptyPath(t *testing.T) {
+	a := Attributes{"x": 1}
+	if v, ok := a.Dig(); ok || v != nil {
+		t.Fatalf("Dig() with no args = (%v, %v), want (nil, false)", v, ok)
+	}
+}
+
+func TestAttributes_Dig_NonMapIntermediate(t *testing.T) {
+	// "kernel.machine" is a string, so digging further must return (nil, false)
+	// rather than panicking on the wrong type assertion.
+	a := Attributes{"kernel": map[string]any{"machine": "x86_64"}}
+	if v, ok := a.Dig("kernel", "machine", "deeper"); ok || v != nil {
+		t.Fatalf("Dig into non-map = (%v, %v), want (nil, false)", v, ok)
+	}
+}
+
+func TestAttributes_Dig_MissingTopLevel(t *testing.T) {
+	a := Attributes{"kernel": map[string]any{}}
+	if v, ok := a.Dig("absent"); ok || v != nil {
+		t.Fatalf("Dig(absent) = (%v, %v), want (nil, false)", v, ok)
+	}
+}
+
+func TestAttributes_GetString_NonString(t *testing.T) {
+	// Non-string values must yield "" (not a panic, not a stringification).
+	a := Attributes{"port": float64(8080), "enabled": true, "name": "web"}
+	if got := a.GetString("port"); got != "" {
+		t.Errorf("GetString(port) = %q, want \"\"", got)
+	}
+	if got := a.GetString("enabled"); got != "" {
+		t.Errorf("GetString(enabled) = %q, want \"\"", got)
+	}
+	if got := a.GetString("name"); got != "web" {
+		t.Errorf("GetString(name) = %q, want web", got)
+	}
+}
+
+func TestAttributes_GetString_Missing(t *testing.T) {
+	if got := (Attributes{}).GetString("nope"); got != "" {
+		t.Errorf("GetString on missing key = %q, want \"\"", got)
+	}
+}
+
 func TestAttributes_RoundTripPreservesUnknown(t *testing.T) {
 	src := []byte(`{"a":1,"nested":{"keep":true},"x":["y"]}`)
 	var a Attributes

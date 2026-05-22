@@ -3,10 +3,61 @@ package cinc
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/tas50/cinc-api/internal/cinctest"
 )
+
+func TestDataBagItem_ID(t *testing.T) {
+	if got := (DataBagItem{"id": "x"}).ID(); got != "x" {
+		t.Errorf("ID = %q, want x", got)
+	}
+	if got := (DataBagItem{}).ID(); got != "" {
+		t.Errorf("empty item ID = %q, want \"\"", got)
+	}
+	// A non-string id should not panic — it returns "".
+	if got := (DataBagItem{"id": 42}).ID(); got != "" {
+		t.Errorf("non-string id returned %q, want \"\"", got)
+	}
+}
+
+func TestDataBagItems_Create_RequiresID(t *testing.T) {
+	srv := cinctest.New(t)
+	c := newTestClient(t, srv.Server)
+	_, _, err := c.DataBags.Items("creds").Create(context.Background(), DataBagItem{"k": "v"})
+	if err == nil {
+		t.Fatal("expected error when item has no id")
+	}
+	if !contains(err.Error(), `"id"`) {
+		t.Errorf("error %q should mention \"id\"", err.Error())
+	}
+}
+
+func TestDataBagItems_Update_RequiresID(t *testing.T) {
+	srv := cinctest.New(t)
+	c := newTestClient(t, srv.Server)
+	_, _, err := c.DataBags.Items("creds").Update(context.Background(), DataBagItem{"k": "v"})
+	if err == nil {
+		t.Fatal("expected error when item has no id")
+	}
+}
+
+func TestDataBags_NotFound(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/data/missing/x", cinctest.Route{
+		Status: 404, Body: `{"error":["item not found"]}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	_, _, err := c.DataBags.Items("missing").Get(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound chain", err)
+	}
+}
 
 func TestDataBags(t *testing.T) {
 	srv := cinctest.New(t)

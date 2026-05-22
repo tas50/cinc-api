@@ -128,6 +128,132 @@ func TestCookbooks_Download_PathTraversal(t *testing.T) {
 	}
 }
 
+func TestCookbookFromDir_Nonexistent(t *testing.T) {
+	_, err := cookbookFromDir(filepath.Join(t.TempDir(), "absent"), "1.0.0")
+	if err == nil {
+		t.Fatal("expected error for nonexistent dir")
+	}
+}
+
+func TestCookbookFromDir_EmptyDir(t *testing.T) {
+	dir := t.TempDir() // empty cookbook
+	_, err := cookbookFromDir(dir, "1.0.0")
+	if err == nil {
+		t.Fatal("expected error for empty cookbook dir")
+	}
+	if !contains(err.Error(), "no files found") {
+		t.Errorf("error %q should mention no files", err.Error())
+	}
+}
+
+func TestCookbookManifest_VersionVariant(t *testing.T) {
+	cb := &LocalCookbook{Name: "n", Version: "1.0.0", files: []cookbookFile{
+		{name: "recipes/default.rb", checksum: "abc"},
+	}}
+	m := cookbookManifest(cb)
+	if m["chef_type"] != "cookbook_version" {
+		t.Errorf("chef_type = %v, want cookbook_version", m["chef_type"])
+	}
+	if m["version"] != "1.0.0" {
+		t.Errorf("version = %v, want 1.0.0", m["version"])
+	}
+	if _, ok := m["identifier"]; ok {
+		t.Error("plain version manifest should not include identifier")
+	}
+	if name, _ := m["name"].(string); name != "n-1.0.0" {
+		t.Errorf("name = %v, want n-1.0.0", m["name"])
+	}
+}
+
+func TestCookbookManifest_ArtifactVariant(t *testing.T) {
+	cb := &LocalCookbook{Name: "n", Version: "1.0.0", Identifier: "abc",
+		files: []cookbookFile{{name: "recipes/default.rb", checksum: "x"}}}
+	m := cookbookManifest(cb)
+	if m["chef_type"] != "cookbook_artifact_version" {
+		t.Errorf("chef_type = %v", m["chef_type"])
+	}
+	if m["identifier"] != "abc" {
+		t.Errorf("identifier = %v", m["identifier"])
+	}
+	if _, ok := m["version"]; ok {
+		t.Error("artifact manifest should not include a version key")
+	}
+}
+
+func TestDownloadFile_NotFound(t *testing.T) {
+	// A 404 from the bookshelf must surface as an ErrorResponse.
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbooks/nginx/1.2.0":
+			if r.Header.Get("X-Ops-Authorization-1") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprintf(w, `{
+				"cookbook_name":"nginx","name":"nginx-1.2.0","version":"1.2.0",
+				"root_files":[{"name":"metadata.rb","path":"metadata.rb","specificity":"default","checksum":"x","url":"http://%s/files/nope"}]
+			}`, r.Host)
+		case r.URL.Path == "/files/nope":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":["gone"]}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+	c := newTestClient(t, srv.Server)
+	err := c.Cookbooks.Download(context.Background(), "nginx", "1.2.0", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for bookshelf 404")
+	}
+}
+
+func TestDownloadFile_BadURL(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/organizations/o/cookbooks/nginx/1.2.0" {
+			fmt.Fprint(w, `{
+				"cookbook_name":"nginx","name":"nginx-1.2.0","version":"1.2.0",
+				"root_files":[{"name":"x","path":"x","specificity":"default","checksum":"x","url":"://not-a-url"}]
+			}`)
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	})
+	c := newTestClient(t, srv.Server)
+	err := c.Cookbooks.Download(context.Background(), "nginx", "1.2.0", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for malformed file URL")
+	}
+}
+
+func TestUploadFile_NonSuccess(t *testing.T) {
+	// A direct uploadFile call whose URL returns 500 should produce an
+	// ErrorResponse describing the upload failure.
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":["bookshelf exploded"]}`))
+	})
+	c := newTestClient(t, srv.Server)
+	err := c.uploadFile(context.Background(), srv.Server.URL+"/file", []byte("data"))
+	if err == nil {
+		t.Fatal("expected error for non-2xx upload")
+	}
+	if !contains(err.Error(), "500") {
+		t.Errorf("error %q should contain status 500", err.Error())
+	}
+}
+
+func TestUploadFile_BadURL(t *testing.T) {
+	c, _ := NewClient(Config{
+		ServerURL: "https://h", Org: "o", ClientName: "c", Key: testRSAKey(t),
+	})
+	if err := c.uploadFile(context.Background(), "://not-a-url", []byte("x")); err == nil {
+		t.Fatal("expected error for malformed upload URL")
+	}
+}
+
 func TestCookbooks_UploadRoundTrip(t *testing.T) {
 	// Build a cookbook on disk: metadata.rb + recipes/default.rb.
 	dir := t.TempDir()
