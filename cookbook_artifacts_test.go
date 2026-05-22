@@ -11,6 +11,48 @@ import (
 	"github.com/tas50/cinc-api/internal/cinctest"
 )
 
+func TestCookbookArtifacts_Upload_ErrorWrapped(t *testing.T) {
+	// Build a minimal cookbook so cookbookFromDir succeeds, then have the
+	// fake server fail the sandbox POST so Upload wraps the error.
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "nginx"), 0o755)
+	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"),
+		[]byte("name 'nginx'\nversion '1.2.0'\n"), 0o644)
+	cb, err := cookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
+	if err != nil {
+		t.Fatalf("cookbookFromDir: %v", err)
+	}
+
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":["sandbox unavailable"]}`))
+	})
+	c := newTestClient(t, srv.Server)
+	uploadErr := c.CookbookArtifacts.Upload(context.Background(), cb, "deadbeef")
+	if uploadErr == nil {
+		t.Fatal("expected error from failing sandbox POST")
+	}
+	if !contains(uploadErr.Error(), "upload cookbook artifact") {
+		t.Errorf("error %q should be wrapped with artifact context", uploadErr.Error())
+	}
+}
+
+func TestCookbookArtifacts_Delete(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("DELETE /organizations/o/cookbook_artifacts/nginx/abc123",
+		cinctest.Route{Body: `{}`})
+	c := newTestClient(t, srv.Server)
+
+	resp, err := c.CookbookArtifacts.Delete(context.Background(), "nginx", "abc123")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if resp == nil || resp.StatusCode != 200 {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
 func TestCookbookArtifacts_GetAndList(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("GET /organizations/o/cookbook_artifacts",

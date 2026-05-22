@@ -215,3 +215,182 @@ func TestRetry_PostNotRetried(t *testing.T) {
 		t.Fatalf("POST hit %d times, want exactly 1 (must not retry non-GET)", n)
 	}
 }
+
+// TestRetry_Exhausted asserts that a persistently failing GET stops after
+// 1 + maxRetries total attempts and surfaces the final error.
+func TestRetry_Exhausted(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{}
+	_, _, err := do[obj](context.Background(), c, "GET", "/x", nil)
+	if err == nil {
+		t.Fatal("expected error after retry exhaustion")
+	}
+	// defaultOptions sets maxRetries=2 -> 1 initial + 2 retries = 3 attempts.
+	if n := hits.Load(); n != 3 {
+		t.Fatalf("got %d hits, want 3 (1 + maxRetries)", n)
+	}
+}
+
+func TestTransport_SetsChefHeaders(t *testing.T) {
+	var headers http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = r.Header.Clone()
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{}
+	if _, _, err := do[obj](context.Background(), c, "GET", "/x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := headers.Get("X-Chef-Version"); got == "" {
+		t.Error("missing X-Chef-Version header")
+	}
+	if got := headers.Get("User-Agent"); got == "" {
+		t.Error("missing User-Agent header")
+	}
+	if got := headers.Get("Accept"); got != "application/json" {
+		t.Errorf("Accept = %q, want application/json", got)
+	}
+}
+
+func TestTransport_SetsContentTypeWithBody(t *testing.T) {
+	var contentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentType = r.Header.Get("Content-Type")
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{}
+	if _, _, err := do[obj](context.Background(), c, "POST", "/x", map[string]int{"a": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if contentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json (POST with body)", contentType)
+	}
+}
+
+func TestTransport_NoContentTypeForBodylessRequest(t *testing.T) {
+	var contentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentType = r.Header.Get("Content-Type")
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{}
+	if _, _, err := do[obj](context.Background(), c, "GET", "/x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if contentType != "" {
+		t.Errorf("Content-Type = %q on bodyless GET, want \"\"", contentType)
+	}
+}
+
+func TestDo_MarshalError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("server should not be hit when marshalling fails")
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	// channels cannot be JSON-encoded.
+	type obj struct{}
+	_, _, err := do[obj](context.Background(), c, "POST", "/x", make(chan int))
+	if err == nil {
+		t.Fatal("expected marshal error")
+	}
+	if !strings.Contains(err.Error(), "marshal body") {
+		t.Errorf("error %q should mention marshalling", err.Error())
+	}
+}
+
+func TestDo_DecodeError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{not valid json`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{ Name string }
+	_, _, err := do[obj](context.Background(), c, "GET", "/x", nil)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "decode response") {
+		t.Errorf("error %q should mention decoding", err.Error())
+	}
+}
+
+func TestDo_EmptyBodyOK(t *testing.T) {
+	// 204 No Content + empty body is a valid success — do should not error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	type obj struct{}
+	_, resp, err := do[obj](context.Background(), c, "DELETE", "/x", nil)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if resp == nil || resp.StatusCode != 204 {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestIsNetErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"canceled", context.Canceled, false},
+		{"deadline", context.DeadlineExceeded, false},
+		{"other", errors.New("connection refused"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNetErr(tc.err); got != tc.want {
+				t.Errorf("isNetErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTransport_BadURL_ReturnsError(t *testing.T) {
+	c, _ := NewClient(Config{
+		ServerURL: "https://h", Org: "o", ClientName: "c", Key: testRSAKey(t),
+	})
+	type obj struct{}
+	// A path with a control character makes http.NewRequestWithContext fail.
+	_, _, err := do[obj](context.Background(), c, "GET", "\n", nil)
+	if err == nil {
+		t.Fatal("expected request-build error")
+	}
+}
+
+func TestDo_NetworkErrorRetried(t *testing.T) {
+	// Use a server we immediately close: every request fails. With maxRetries=2
+	// a GET should be attempted 3 times before giving up.
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	addr := srv.URL
+	srv.Close()
+	c, err := NewClient(Config{
+		ServerURL: addr, Org: "o", ClientName: "c", Key: testRSAKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type obj struct{}
+	_, _, err = do[obj](context.Background(), c, "GET", "/x", nil)
+	if err == nil {
+		t.Fatal("expected error from dead server")
+	}
+}

@@ -115,6 +115,65 @@ func TestSearch_AllWithStart(t *testing.T) {
 	}
 }
 
+func TestSearch_PartialUsesPOST(t *testing.T) {
+	// WithPartial switches the request to POST with a body containing the
+	// requested key projection.
+	var (
+		gotMethod  string
+		bodyMap    map[string][]string
+	)
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Ops-Authorization-1") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		gotMethod = r.Method
+		json.NewDecoder(r.Body).Decode(&bodyMap)
+		w.Write([]byte(`{"total":0,"start":0,"rows":[]}`))
+	})
+	c := newTestClient(t, srv.Server)
+	keys := map[string][]string{"ip": {"ipaddress"}, "name": {"name"}}
+	_, _, err := c.Search.Query(context.Background(), "node", "*:*", WithPartial(keys))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("method = %q, want POST when WithPartial is set", gotMethod)
+	}
+	if len(bodyMap) != 2 || bodyMap["ip"][0] != "ipaddress" {
+		t.Errorf("body = %+v, want partial key projection", bodyMap)
+	}
+}
+
+func TestSearch_Query_Error(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node",
+		cinctest.Route{Status: 500, Body: `{"error":["boom"]}`})
+	c := newTestClient(t, srv.Server)
+	res, _, err := c.Search.Query(context.Background(), "node", "*:*")
+	if err == nil {
+		t.Fatal("expected error from 500")
+	}
+	if res != nil {
+		t.Errorf("res = %+v, want nil on error", res)
+	}
+}
+
+func TestSearch_All_PropagatesError(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node",
+		cinctest.Route{Status: 404, Body: `{"error":["no index"]}`})
+	c := newTestClient(t, srv.Server)
+	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*")
+	if err == nil {
+		t.Fatal("expected error from underlying Query")
+	}
+	if rows != nil {
+		t.Errorf("rows = %+v, want nil on error", rows)
+	}
+}
+
 func TestSearch_All(t *testing.T) {
 	srv := cinctest.New(t)
 	page := 0
