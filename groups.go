@@ -30,10 +30,11 @@ func (s *GroupsService) Get(ctx context.Context, name string) (*Group, *Response
 }
 
 // Create creates an empty group with the given name. Use Update to populate
-// its members.
+// its members. The server identifies the new group by "groupname" (a "name"
+// key is rejected with a 400).
 func (s *GroupsService) Create(ctx context.Context, name string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "POST",
-		s.client.orgPath("/groups"), map[string]string{"name": name})
+		s.client.orgPath("/groups"), map[string]string{"groupname": name})
 	return resp, err
 }
 
