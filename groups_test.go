@@ -51,8 +51,13 @@ func TestGroups_Create(t *testing.T) {
 		Assert: func(t *testing.T, _ *http.Request, body []byte) {
 			var req map[string]any
 			json.Unmarshal(body, &req)
-			if req["name"] != "devs" {
-				t.Errorf("POST body = %v, want name=devs", req)
+			// The Chef Server identifies a new group by "groupname"
+			// (or "id"); a "name" key is rejected with a 400.
+			if req["groupname"] != "devs" {
+				t.Errorf("POST body = %v, want groupname=devs", req)
+			}
+			if _, ok := req["name"]; ok {
+				t.Errorf("POST body should not carry a \"name\" key: %v", req)
 			}
 		},
 	})
