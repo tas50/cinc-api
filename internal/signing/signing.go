@@ -4,7 +4,6 @@ package signing
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"regexp"
 	"strings"
 )
 
@@ -26,29 +25,61 @@ func ContentHash(body []byte) string {
 	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
-var multiSlash = regexp.MustCompile(`/+`)
-
 // CanonicalPath collapses repeated slashes and strips a trailing slash.
 func CanonicalPath(p string) string {
 	if p == "" {
 		return "/"
 	}
-	p = multiSlash.ReplaceAllString(p, "/")
-	if len(p) > 1 {
-		p = strings.TrimSuffix(p, "/")
+	// Fast path: real request paths almost never contain a repeated slash,
+	// so avoid the allocating scan and just trim a trailing slash.
+	if !strings.Contains(p, "//") {
+		if len(p) > 1 && p[len(p)-1] == '/' {
+			return p[:len(p)-1]
+		}
+		return p
 	}
-	return p
+	var b strings.Builder
+	b.Grow(len(p))
+	var prev byte
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if c == '/' && prev == '/' {
+			continue
+		}
+		b.WriteByte(c)
+		prev = c
+	}
+	out := b.String()
+	if len(out) > 1 && out[len(out)-1] == '/' {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
 // CanonicalRequest builds the v1.3 string-to-sign for r.
 func CanonicalRequest(r Request) string {
-	return strings.Join([]string{
-		"Method:" + r.Method,
-		"Path:" + CanonicalPath(r.Path),
-		"X-Ops-Content-Hash:" + ContentHash(r.Body),
-		"X-Ops-Sign:version=1.3",
-		"X-Ops-Timestamp:" + r.Timestamp,
-		"X-Ops-UserId:" + r.UserID,
-		"X-Ops-Server-API-Version:" + ServerAPIVersion,
-	}, "\n")
+	return canonicalRequest(r, ContentHash(r.Body))
+}
+
+// canonicalRequest builds the v1.3 string-to-sign using a precomputed content
+// hash, so callers that also need the hash for a header (SignHeaders) can hash
+// the body just once instead of twice.
+func canonicalRequest(r Request, contentHash string) string {
+	var b strings.Builder
+	// "Method:" + ... and the six fixed-string separators total ~90 bytes.
+	b.Grow(len(r.Method) + len(r.Path) + len(contentHash) +
+		len(r.Timestamp) + len(r.UserID) + 96)
+	b.WriteString("Method:")
+	b.WriteString(r.Method)
+	b.WriteString("\nPath:")
+	b.WriteString(CanonicalPath(r.Path))
+	b.WriteString("\nX-Ops-Content-Hash:")
+	b.WriteString(contentHash)
+	b.WriteString("\nX-Ops-Sign:version=1.3\nX-Ops-Timestamp:")
+	b.WriteString(r.Timestamp)
+	b.WriteString("\nX-Ops-UserId:")
+	b.WriteString(r.UserID)
+	b.WriteString("\nX-Ops-Server-API-Version:")
+	b.WriteString(ServerAPIVersion)
+	return b.String()
 }
