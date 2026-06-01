@@ -12,15 +12,15 @@ import (
 )
 
 func TestCookbookArtifacts_Upload_ErrorWrapped(t *testing.T) {
-	// Build a minimal cookbook so cookbookFromDir succeeds, then have the
+	// Build a minimal cookbook so LocalCookbookFromDir succeeds, then have the
 	// fake server fail the sandbox POST so Upload wraps the error.
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "nginx"), 0o755)
 	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"),
 		[]byte("name 'nginx'\nversion '1.2.0'\n"), 0o644)
-	cb, err := cookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
+	cb, err := LocalCookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
 	if err != nil {
-		t.Fatalf("cookbookFromDir: %v", err)
+		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
 
 	srv := cinctest.New(t)
@@ -81,9 +81,9 @@ func TestCookbookArtifacts_UploadRoundTrip(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"), metadataContent, 0o644)
 	os.WriteFile(filepath.Join(dir, "nginx", "recipes", "default.rb"), recipeContent, 0o644)
 
-	cb, err := cookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
+	cb, err := LocalCookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
 	if err != nil {
-		t.Fatalf("cookbookFromDir: %v", err)
+		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
 
 	const identifier = "abc1234567890abcdef1234567890abcdef12345"

@@ -33,28 +33,41 @@ type CookbookFileRef struct {
 }
 
 // Cookbook is a single cookbook version's manifest as returned by the server.
-// The nine file-segment slices are populated by Get/Download.
+// A server returns files in one of two shapes: the per-segment slices (the
+// classic cookbook_version layout) or the flat AllFilesManifest ("all_files",
+// used by Policyfile-era cookbook and cookbook_artifact manifests). AllFiles
+// merges whichever the server populated.
 type Cookbook struct {
-	CookbookName string            `json:"cookbook_name"`
-	Name         string            `json:"name"`
-	Version      string            `json:"version"`
-	Files        []CookbookFileRef `json:"files"`
-	Definitions  []CookbookFileRef `json:"definitions"`
-	Libraries    []CookbookFileRef `json:"libraries"`
-	Attributes   []CookbookFileRef `json:"attributes"`
-	Recipes      []CookbookFileRef `json:"recipes"`
-	Providers    []CookbookFileRef `json:"providers"`
-	Resources    []CookbookFileRef `json:"resources"`
-	RootFiles    []CookbookFileRef `json:"root_files"`
-	Templates    []CookbookFileRef `json:"templates"`
+	CookbookName string `json:"cookbook_name"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+
+	// AllFilesManifest is the flat "all_files" file list. Cookbooks uploaded by
+	// this client use it, and modern servers return it on Get.
+	AllFilesManifest []CookbookFileRef `json:"all_files,omitempty"`
+
+	// Per-segment slices (classic cookbook_version layout).
+	Files       []CookbookFileRef `json:"files"`
+	Definitions []CookbookFileRef `json:"definitions"`
+	Libraries   []CookbookFileRef `json:"libraries"`
+	Attributes  []CookbookFileRef `json:"attributes"`
+	Recipes     []CookbookFileRef `json:"recipes"`
+	Providers   []CookbookFileRef `json:"providers"`
+	Resources   []CookbookFileRef `json:"resources"`
+	RootFiles   []CookbookFileRef `json:"root_files"`
+	Templates   []CookbookFileRef `json:"templates"`
 }
 
-// AllFiles flattens all nine file-segment slices into a single slice.
+// AllFiles flattens the flat all_files manifest and all nine per-segment slices
+// into a single slice. A server response populates one shape or the other, so
+// the merge yields the cookbook's files in either case.
 func (cb *Cookbook) AllFiles() []CookbookFileRef {
 	all := make([]CookbookFileRef, 0,
-		len(cb.Files)+len(cb.Definitions)+len(cb.Libraries)+
+		len(cb.AllFilesManifest)+
+			len(cb.Files)+len(cb.Definitions)+len(cb.Libraries)+
 			len(cb.Attributes)+len(cb.Recipes)+len(cb.Providers)+
 			len(cb.Resources)+len(cb.RootFiles)+len(cb.Templates))
+	all = append(all, cb.AllFilesManifest...)
 	for _, seg := range [][]CookbookFileRef{
 		cb.Files, cb.Definitions, cb.Libraries, cb.Attributes,
 		cb.Recipes, cb.Providers, cb.Resources, cb.RootFiles, cb.Templates,
@@ -250,8 +263,12 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 	}
 }
 
-// cookbookFromDir walks a cookbook directory into an uploadable LocalCookbook.
-func cookbookFromDir(dir, version string) (*LocalCookbook, error) {
+// LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
+// pass to CookbooksService.Upload (or, with an identifier,
+// CookbookArtifactsService.Upload). The cookbook name is taken from the base
+// name of dir. Every file under dir is read and checksummed; an empty directory
+// is an error.
+func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	cb := &LocalCookbook{Name: filepath.Base(dir), Version: version}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,9 +144,9 @@ func TestCookbooks_Upload_ParallelDedup(t *testing.T) {
 	os.WriteFile(filepath.Join(root, "recipes", "b.rb"), shared, 0o644) // same checksum as a.rb
 	os.WriteFile(filepath.Join(root, "metadata.rb"), unique, 0o644)
 
-	cb, err := cookbookFromDir(root, "1.0.0")
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
 	if err != nil {
-		t.Fatalf("cookbookFromDir: %v", err)
+		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
 	sharedCk, uniqueCk := md5Hex(shared), md5Hex(unique)
 
@@ -191,16 +192,36 @@ func TestCookbooks_Upload_ParallelDedup(t *testing.T) {
 	}
 }
 
-func TestCookbookFromDir_Nonexistent(t *testing.T) {
-	_, err := cookbookFromDir(filepath.Join(t.TempDir(), "absent"), "1.0.0")
+func TestCookbook_AllFiles_ParsesAllFilesManifest(t *testing.T) {
+	// A manifest in the flat all_files shape (what this client uploads and what
+	// modern servers return) must round-trip through AllFiles().
+	var cb Cookbook
+	body := `{"cookbook_name":"nginx","name":"nginx-1.0.0","version":"1.0.0",
+		"all_files":[
+			{"name":"default.rb","path":"recipes/default.rb","checksum":"abc","url":"http://x/abc"},
+			{"name":"metadata.rb","path":"metadata.rb","checksum":"def","url":"http://x/def"}]}`
+	if err := json.Unmarshal([]byte(body), &cb); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	files := cb.AllFiles()
+	if len(files) != 2 {
+		t.Fatalf("AllFiles() = %d entries, want 2", len(files))
+	}
+	if files[0].Path != "recipes/default.rb" || files[0].URL != "http://x/abc" {
+		t.Errorf("first file = %+v", files[0])
+	}
+}
+
+func TestLocalCookbookFromDir_Nonexistent(t *testing.T) {
+	_, err := LocalCookbookFromDir(filepath.Join(t.TempDir(), "absent"), "1.0.0")
 	if err == nil {
 		t.Fatal("expected error for nonexistent dir")
 	}
 }
 
-func TestCookbookFromDir_EmptyDir(t *testing.T) {
+func TestLocalCookbookFromDir_EmptyDir(t *testing.T) {
 	dir := t.TempDir() // empty cookbook
-	_, err := cookbookFromDir(dir, "1.0.0")
+	_, err := LocalCookbookFromDir(dir, "1.0.0")
 	if err == nil {
 		t.Fatal("expected error for empty cookbook dir")
 	}
@@ -326,9 +347,9 @@ func TestCookbooks_UploadRoundTrip(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "nginx", "metadata.rb"), metadataContent, 0o644)
 	os.WriteFile(filepath.Join(dir, "nginx", "recipes", "default.rb"), recipeContent, 0o644)
 
-	cb, err := cookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
+	cb, err := LocalCookbookFromDir(filepath.Join(dir, "nginx"), "1.2.0")
 	if err != nil {
-		t.Fatalf("cookbookFromDir: %v", err)
+		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
 	if len(cb.files) != 2 {
 		t.Fatalf("expected 2 files, got %d", len(cb.files))
