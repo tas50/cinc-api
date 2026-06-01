@@ -2,6 +2,7 @@
 package cinc
 
 import (
+	"crypto/tls"
 	"net/http"
 	"strings"
 	"testing"
@@ -110,6 +111,79 @@ func TestNewClient_SkipTLSVerify(t *testing.T) {
 	}
 	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("InsecureSkipVerify not enabled by WithSkipTLSVerify(true)")
+	}
+}
+
+func TestNewClient_SkipTLSVerify_PreservesDefaultTuning(t *testing.T) {
+	c, err := NewClient(Config{
+		ServerURL: "https://h", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	}, WithSkipTLSVerify(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := c.httpClient.Transport.(*http.Transport)
+	// Cloning http.DefaultTransport must preserve HTTP/2, proxy support, and
+	// connection pooling rather than dropping them on the skipTLSVerify path.
+	if !tr.ForceAttemptHTTP2 {
+		t.Error("ForceAttemptHTTP2 dropped; HTTP/2 negotiation disabled")
+	}
+	if tr.Proxy == nil {
+		t.Error("Proxy dropped; HTTPS_PROXY/NO_PROXY no longer honored")
+	}
+	if tr.DialContext == nil {
+		t.Error("DialContext dropped; keepalive dialing lost")
+	}
+	def := http.DefaultTransport.(*http.Transport)
+	if tr.IdleConnTimeout != def.IdleConnTimeout {
+		t.Errorf("IdleConnTimeout = %v, want default %v", tr.IdleConnTimeout, def.IdleConnTimeout)
+	}
+}
+
+func TestNewClient_SkipTLSVerify_PreservesCallerTransport(t *testing.T) {
+	custom := &http.Client{Transport: &http.Transport{
+		MaxIdleConnsPerHost: 42,
+	}}
+	c, err := NewClient(Config{
+		ServerURL: "https://h", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	}, WithHTTPClient(custom), WithSkipTLSVerify(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := c.httpClient.Transport.(*http.Transport)
+	// A caller-supplied *http.Transport must have its tuning preserved, with
+	// only InsecureSkipVerify flipped on.
+	if tr.MaxIdleConnsPerHost != 42 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 42 (caller transport clobbered)", tr.MaxIdleConnsPerHost)
+	}
+	if cfg := tr.TLSClientConfig; cfg == nil || !cfg.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify not enabled")
+	}
+}
+
+func TestNewClient_SkipTLSVerify_PreservesExistingTLSConfig(t *testing.T) {
+	custom := &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{ServerName: "internal.example"},
+	}}
+	c, err := NewClient(Config{
+		ServerURL: "https://h", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	}, WithHTTPClient(custom), WithSkipTLSVerify(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := c.httpClient.Transport.(*http.Transport).TLSClientConfig
+	// Existing TLS settings are preserved; only InsecureSkipVerify is flipped.
+	if cfg.ServerName != "internal.example" {
+		t.Errorf("ServerName = %q, want preserved", cfg.ServerName)
+	}
+	if !cfg.InsecureSkipVerify {
+		t.Error("InsecureSkipVerify not enabled")
+	}
+	// The caller's TLS config must not be mutated in place.
+	if custom.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify {
+		t.Error("caller's TLSClientConfig mutated in place")
 	}
 }
 

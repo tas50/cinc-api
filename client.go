@@ -57,9 +57,7 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	}
 	hc := o.httpClient
 	if o.skipTLSVerify {
-		hc = &http.Client{Timeout: hc.Timeout, Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}}
+		hc = &http.Client{Timeout: hc.Timeout, Transport: cloneTransportSkipVerify(hc.Transport)}
 	}
 	c := &Client{
 		baseURL: base, org: cfg.Org, clientName: cfg.ClientName,
@@ -85,6 +83,24 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	c.ACLs = &ACLsService{client: c}
 	c.RequiredRecipe = &RequiredRecipeService{client: c}
 	return c, nil
+}
+
+// cloneTransportSkipVerify returns a transport that mirrors base but skips TLS
+// verification. When base is a caller-supplied *http.Transport its tuning is
+// preserved; otherwise (nil, as with the default client, or a non-Transport
+// RoundTripper) http.DefaultTransport is cloned so HTTP/2, proxy support, and
+// connection pooling are retained. Only InsecureSkipVerify is flipped on.
+func cloneTransportSkipVerify(base http.RoundTripper) *http.Transport {
+	tr, ok := base.(*http.Transport)
+	if !ok || tr == nil {
+		tr = http.DefaultTransport.(*http.Transport)
+	}
+	clone := tr.Clone()
+	if clone.TLSClientConfig == nil {
+		clone.TLSClientConfig = &tls.Config{}
+	}
+	clone.TLSClientConfig.InsecureSkipVerify = true
+	return clone
 }
 
 // orgPath prefixes p with /organizations/<org>.
