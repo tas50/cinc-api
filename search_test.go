@@ -115,6 +115,39 @@ func TestSearch_AllWithStart(t *testing.T) {
 	}
 }
 
+// TestSearch_All_CapsPrealloc drives the preallocation cap: a server reporting
+// an enormous total must not trigger a huge up-front allocation, and all rows
+// are still returned correctly.
+func TestSearch_All_CapsPrealloc(t *testing.T) {
+	srv := cinctest.New(t)
+	page := 0
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Ops-Authorization-1") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if page == 0 {
+			page++
+			// Total far exceeds maxPrealloc (100_000); only one row is actually
+			// returned, and the next page is empty to terminate paging.
+			w.Write([]byte(`{"total":5000000,"start":0,"rows":[{"name":"a"}]}`))
+			return
+		}
+		w.Write([]byte(`{"total":5000000,"start":1,"rows":[]}`))
+	})
+	c := newTestClient(t, srv.Server)
+	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*")
+	if err != nil {
+		t.Fatalf("SearchAll: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if cap(rows) > 100_000 {
+		t.Fatalf("preallocated cap = %d, want it capped at 100_000", cap(rows))
+	}
+}
+
 func TestSearch_PartialUsesPOST(t *testing.T) {
 	// WithPartial switches the request to POST with a body containing the
 	// requested key projection.

@@ -39,7 +39,7 @@ func isNetErr(err error) bool {
 }
 
 func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
-	u := c.baseURL.String() + path
+	u := c.baseURLStr + path
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)

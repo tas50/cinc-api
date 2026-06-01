@@ -75,6 +75,20 @@ func (s *SearchService) SearchAll(ctx context.Context, index, query string, opts
 		if err != nil {
 			return nil, err
 		}
+		if all == nil {
+			// Preallocate from the server-reported total so paging through a
+			// large result set doesn't repeatedly regrow and copy the slice.
+			// Cap the hint so a misreporting server can't force a huge up-front
+			// allocation; append still grows past the hint if needed.
+			capHint := res.Total - offset
+			const maxPrealloc = 100_000
+			if capHint > maxPrealloc {
+				capHint = maxPrealloc
+			}
+			if capHint > 0 {
+				all = make([]json.RawMessage, 0, capHint)
+			}
+		}
 		all = append(all, res.Rows...)
 		offset += len(res.Rows)
 		if len(res.Rows) == 0 || offset >= res.Total {
