@@ -118,17 +118,26 @@ func (s *CookbooksService) Download(ctx context.Context, name, version, destDir 
 	if err != nil {
 		return fmt.Errorf("cinc: get cookbook manifest: %w", err)
 	}
-	for _, ref := range cb.AllFiles() {
+	// Resolve and validate every destination path up front (cheap, sequential)
+	// so a traversal attempt fails fast before any file is fetched or written.
+	refs := cb.AllFiles()
+	type fileDownload struct{ url, dest, path string }
+	jobs := make([]fileDownload, len(refs))
+	for i, ref := range refs {
 		dest := filepath.Join(destDir, filepath.FromSlash(ref.Path))
 		rel, err := filepath.Rel(destDir, dest)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("cinc: unsafe file path in cookbook manifest: %q", ref.Path)
 		}
-		if err := s.client.downloadFile(ctx, ref.URL, dest); err != nil {
-			return fmt.Errorf("cinc: download %s: %w", ref.Path, err)
-		}
+		jobs[i] = fileDownload{url: ref.URL, dest: dest, path: ref.Path}
 	}
-	return nil
+	// Cookbook files are independent and latency-bound; fetch them in parallel.
+	return parallelForEach(ctx, jobs, func(ctx context.Context, j fileDownload) error {
+		if err := s.client.downloadFile(ctx, j.url, j.dest); err != nil {
+			return fmt.Errorf("cinc: download %s: %w", j.path, err)
+		}
+		return nil
+	})
 }
 
 // downloadFile GETs a pre-signed bookshelf URL (no Chef signing) and writes
@@ -170,14 +179,30 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 	if err != nil {
 		return fmt.Errorf("cinc: create sandbox: %w", err)
 	}
+	// Collect the files the server actually needs, deduped by checksum so two
+	// files with identical content don't both PUT to the same pre-signed URL.
+	type uploadJob struct {
+		url, name string
+		content   []byte
+	}
+	seen := make(map[string]bool, len(cb.files))
+	var jobs []uploadJob
 	for _, f := range cb.files {
 		entry, needed := sb.Checksums[f.checksum]
-		if !needed || !entry.NeedsUpload {
+		if !needed || !entry.NeedsUpload || seen[f.checksum] {
 			continue
 		}
-		if err := c.uploadFile(ctx, entry.URL, f.content); err != nil {
-			return fmt.Errorf("cinc: upload %s: %w", f.name, err)
+		seen[f.checksum] = true
+		jobs = append(jobs, uploadJob{url: entry.URL, name: f.name, content: f.content})
+	}
+	// Uploads are independent and latency-bound; run them in parallel.
+	if err := parallelForEach(ctx, jobs, func(ctx context.Context, j uploadJob) error {
+		if err := c.uploadFile(ctx, j.url, j.content); err != nil {
+			return fmt.Errorf("cinc: upload %s: %w", j.name, err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	if _, err := c.commitSandbox(ctx, sb.ID); err != nil {
 		return fmt.Errorf("cinc: commit sandbox: %w", err)

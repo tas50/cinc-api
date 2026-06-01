@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tas50/cinc-api/internal/cinctest"
@@ -125,6 +127,67 @@ func TestCookbooks_Download_PathTraversal(t *testing.T) {
 	escapedPath := filepath.Join(filepath.Dir(dest), "escape.txt")
 	if _, statErr := os.Stat(escapedPath); statErr == nil {
 		t.Errorf("path traversal: file was written outside destDir at %s", escapedPath)
+	}
+}
+
+func TestCookbooks_Upload_ParallelDedup(t *testing.T) {
+	// A cookbook with three files where two share identical content (and thus
+	// the same checksum). The shared checksum must be PUT exactly once, and the
+	// concurrent uploads must be race-clean (run with -race).
+	dir := t.TempDir()
+	root := filepath.Join(dir, "dup")
+	os.MkdirAll(filepath.Join(root, "recipes"), 0o755)
+	shared := []byte("shared content\n")
+	unique := []byte("unique content\n")
+	os.WriteFile(filepath.Join(root, "recipes", "a.rb"), shared, 0o644)
+	os.WriteFile(filepath.Join(root, "recipes", "b.rb"), shared, 0o644) // same checksum as a.rb
+	os.WriteFile(filepath.Join(root, "metadata.rb"), unique, 0o644)
+
+	cb, err := cookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("cookbookFromDir: %v", err)
+	}
+	sharedCk, uniqueCk := md5Hex(shared), md5Hex(unique)
+
+	var mu sync.Mutex
+	uploads := map[string]int{} // checksum -> number of PUTs received
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			base := "http://" + r.Host
+			w.WriteHeader(201)
+			fmt.Fprintf(w, `{"sandbox_id":"sb1","checksums":{
+				"%s":{"needs_upload":true,"url":"%s/upload/%s"},
+				"%s":{"needs_upload":true,"url":"%s/upload/%s"}}}`,
+				sharedCk, base, sharedCk, uniqueCk, base, uniqueCk)
+		case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/upload/"):
+			ck := strings.TrimPrefix(r.URL.Path, "/upload/")
+			mu.Lock()
+			uploads[ck]++
+			mu.Unlock()
+			w.WriteHeader(200)
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb1":
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/cookbooks/dup/1.0.0":
+			w.WriteHeader(201)
+			w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+	c := newTestClient(t, srv.Server)
+	if err := c.Cookbooks.Upload(context.Background(), cb); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if uploads[sharedCk] != 1 {
+		t.Errorf("shared checksum uploaded %d times, want exactly 1", uploads[sharedCk])
+	}
+	if uploads[uniqueCk] != 1 {
+		t.Errorf("unique checksum uploaded %d times, want exactly 1", uploads[uniqueCk])
 	}
 }
 
