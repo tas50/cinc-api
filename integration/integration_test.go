@@ -8,6 +8,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -27,7 +28,14 @@ func newClient(t *testing.T) *cinc.Client {
 	if err := srv.Start(); err != nil {
 		t.Fatalf("server.Start: %v", err)
 	}
+
+	// Use a client whose transport we retain so cleanup can close pooled
+	// keep-alive connections before stopping the server. Otherwise the server's
+	// graceful shutdown blocks until our idle connections time out — several
+	// seconds per test after a parallel cookbook download opens many of them.
+	hc := &http.Client{Timeout: 30 * time.Second}
 	t.Cleanup(func() {
+		hc.CloseIdleConnections()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Stop(ctx)
@@ -42,7 +50,7 @@ func newClient(t *testing.T) *cinc.Client {
 		Org:        "test",
 		ClientName: srv.AdminName(),
 		Key:        key,
-	})
+	}, cinc.WithHTTPClient(hc))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
