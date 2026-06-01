@@ -49,6 +49,24 @@ func TestClient_now(t *testing.T) {
 	}
 }
 
+func TestNewClient_CachesBaseURLString(t *testing.T) {
+	c, err := NewClient(Config{
+		ServerURL: "https://chef.example.com/", Org: "o",
+		ClientName: "c", Key: testRSAKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The serialized base URL is cached once so the request hot path does not
+	// re-serialize *url.URL on every call.
+	if c.baseURLStr != c.baseURL.String() {
+		t.Fatalf("baseURLStr = %q, want %q", c.baseURLStr, c.baseURL.String())
+	}
+	if c.baseURLStr != "https://chef.example.com" {
+		t.Fatalf("baseURLStr = %q, want trailing slash trimmed", c.baseURLStr)
+	}
+}
+
 func TestNewClient_TrimsTrailingSlash(t *testing.T) {
 	c, err := NewClient(Config{
 		ServerURL: "https://chef.example.com/", Org: "o",

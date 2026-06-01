@@ -13,6 +13,7 @@ import (
 // Client is a Chef/CINC Server API client. It is safe for concurrent use.
 type Client struct {
 	baseURL    *url.URL
+	baseURLStr string // cached baseURL.String() for the request hot path
 	org        string
 	clientName string
 	key        *rsa.PrivateKey
@@ -60,7 +61,7 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 		hc = &http.Client{Timeout: hc.Timeout, Transport: cloneTransportSkipVerify(hc.Transport)}
 	}
 	c := &Client{
-		baseURL: base, org: cfg.Org, clientName: cfg.ClientName,
+		baseURL: base, baseURLStr: base.String(), org: cfg.Org, clientName: cfg.ClientName,
 		key: cfg.Key, httpClient: hc, opts: o, clock: time.Now,
 	}
 	c.Nodes = &NodesService{client: c}
