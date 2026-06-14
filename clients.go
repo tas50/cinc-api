@@ -1,6 +1,9 @@
 package cinc
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // APIClient is a Chef API client (node or validator identity). It is named
 // APIClient to avoid colliding with the package's own Client type.
@@ -51,4 +54,24 @@ func (s *ClientsService) Delete(ctx context.Context, name string) (*Response, er
 // List returns the client name->URL index.
 func (s *ClientsService) List(ctx context.Context) (map[string]string, *Response, error) {
 	return s.res().list(ctx)
+}
+
+// Reregister regenerates the named client's "default" key, invalidating the
+// old private key and returning the new one (in the result's PrivateKey).
+//
+// The keys API has no in-place regenerate, so this deletes the existing
+// "default" key and creates a fresh one with the server generating the pair.
+// The two calls are not atomic: if the create fails after the delete, the
+// client is briefly left without a default key, and the returned error says so
+// — recover by adding a key with Keys.Client(name).Create.
+func (s *ClientsService) Reregister(ctx context.Context, name string) (*Key, *Response, error) {
+	keys := s.client.Keys.Client(name)
+	if _, err := keys.Delete(ctx, "default"); err != nil {
+		return nil, nil, err
+	}
+	created, resp, err := keys.Create(ctx, &Key{Name: "default", CreateKey: true, ExpirationDate: "infinity"})
+	if err != nil {
+		return nil, resp, fmt.Errorf("cinc: reregister %q deleted the old default key but could not create a new one (add one with Keys.Client(%q).Create): %w", name, name, err)
+	}
+	return created, resp, nil
 }
