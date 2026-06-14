@@ -36,7 +36,7 @@ following endpoint families are implemented:
 | `c.License`          | `/license`                            | Get (node-license usage)                                             |
 | `c.Nodes`            | `/nodes`                              | List / Get / Create / Update / Delete                                |
 | `c.Orgs`             | `/organizations` (top-level)          | List / Get / Create / Update / Delete                                |
-| `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision  |
+| `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision / PushRevision |
 | `c.PolicyGroups`     | `/policy_groups`                      | List / Get / Delete / GetPolicy / PutPolicy / DeletePolicy           |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
 | `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete                                |
@@ -62,6 +62,12 @@ model, so callers don't re-encode server conventions:
   `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
 - `Clients.Reregister(name)` — regenerate a client's `default` key and return
   the new private key.
+- `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a
+  `Policyfile.lock.json` into a `PolicyRevision`.
+- `Policies.PushRevision(lockJSON, group, cookbooks)` — the server-side half of
+  `chef push`: upload each pinned cookbook as an artifact, then associate the
+  revision with a policy group. The lock bytes are sent verbatim so no fields
+  are lost.
 
 ## License
 
