@@ -25,7 +25,7 @@ following endpoint families are implemented:
 | Service              | Path                                  | Methods                                                              |
 | -------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission                                                  |
-| `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete                                |
+| `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
 | `c.Cookbooks`        | `/cookbooks`                          | List / Get / Delete / Upload (sandbox flow) / Download               |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / Get / Delete / Upload                                         |
@@ -47,6 +47,21 @@ following endpoint families are implemented:
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`. Idempotent GETs
 are retried on 5xx and network errors.
+
+### Helpers
+
+Standalone helpers for working with Chef/CINC identities and the node object
+model, so callers don't re-encode server conventions:
+
+- `ParseServerURL(raw)` — split `https://host/organizations/<org>` into the
+  base server URL and org (the inverse of `NewClient`'s `ServerURL`/`Org`).
+- `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
+  counterpart to `ParseKey`/`LoadKeyFile`).
+- `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
+  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
+  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
+- `Clients.Reregister(name)` — regenerate a client's `default` key and return
+  the new private key.
 
 ## License
 

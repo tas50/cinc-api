@@ -120,3 +120,45 @@ func TestLoadKeyFile_Missing(t *testing.T) {
 		t.Errorf("error %q should mention reading the key file", err.Error())
 	}
 }
+
+func TestGenerateKeyPair(t *testing.T) {
+	privPEM, pubPEM, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+
+	// The private PEM must round-trip back through the library's own parser.
+	priv, err := ParseKey([]byte(privPEM))
+	if err != nil {
+		t.Fatalf("ParseKey on generated private key: %v", err)
+	}
+	if bits := priv.N.BitLen(); bits != 2048 {
+		t.Errorf("generated key is %d bits, want 2048", bits)
+	}
+
+	// The public PEM must be a PKIX RSA public key matching the private key.
+	block, _ := pem.Decode([]byte(pubPEM))
+	if block == nil || block.Type != "PUBLIC KEY" {
+		t.Fatalf("public PEM block = %+v, want a PUBLIC KEY block", block)
+	}
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParsePKIXPublicKey: %v", err)
+	}
+	rsaPub, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		t.Fatalf("public key is %T, want *rsa.PublicKey", pub)
+	}
+	if rsaPub.N.Cmp(priv.N) != 0 || rsaPub.E != priv.E {
+		t.Error("public key does not match the generated private key")
+	}
+
+	// Two calls must not produce identical key material.
+	priv2, _, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair (second): %v", err)
+	}
+	if priv2 == privPEM {
+		t.Error("two GenerateKeyPair calls returned identical private keys")
+	}
+}

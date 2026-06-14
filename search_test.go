@@ -152,8 +152,8 @@ func TestSearch_PartialUsesPOST(t *testing.T) {
 	// WithPartial switches the request to POST with a body containing the
 	// requested key projection.
 	var (
-		gotMethod  string
-		bodyMap    map[string][]string
+		gotMethod string
+		bodyMap   map[string][]string
 	)
 	srv := cinctest.New(t)
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
