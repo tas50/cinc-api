@@ -144,6 +144,20 @@ func (s *CookbooksService) List(ctx context.Context) (map[string]CookbookListEnt
 		s.client.orgPath("/cookbooks"), nil)
 }
 
+// ListLatest returns the name->URL index of the latest version of each
+// cookbook (GET /cookbooks/_latest).
+func (s *CookbooksService) ListLatest(ctx context.Context) (map[string]string, *Response, error) {
+	return do[map[string]string](ctx, s.client, "GET",
+		s.client.orgPath("/cookbooks/_latest"), nil)
+}
+
+// ListRecipes returns every recipe in the latest version of each cookbook
+// (GET /cookbooks/_recipes).
+func (s *CookbooksService) ListRecipes(ctx context.Context) ([]string, *Response, error) {
+	return do[[]string](ctx, s.client, "GET",
+		s.client.orgPath("/cookbooks/_recipes"), nil)
+}
+
 // Get retrieves a single cookbook version manifest.
 func (s *CookbooksService) Get(ctx context.Context, name, version string) (*Cookbook, *Response, error) {
 	cb, resp, err := do[Cookbook](ctx, s.client, "GET",

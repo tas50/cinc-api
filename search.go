@@ -38,6 +38,12 @@ func WithPartial(keys map[string][]string) SearchOption {
 // SearchService accesses the /search endpoints.
 type SearchService struct{ client *Client }
 
+// Indexes returns the name->URL index of available search indexes (node,
+// role, client, environment, and one per data bag).
+func (s *SearchService) Indexes(ctx context.Context) (map[string]string, *Response, error) {
+	return do[map[string]string](ctx, s.client, "GET", s.client.orgPath("/search"), nil)
+}
+
 // Query runs a single search against index with the given query string.
 func (s *SearchService) Query(ctx context.Context, index, query string, opts ...SearchOption) (*SearchResult, *Response, error) {
 	p := searchParams{rows: 1000}

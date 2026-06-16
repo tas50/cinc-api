@@ -46,3 +46,18 @@ func (s *RolesService) Delete(ctx context.Context, name string) (*Response, erro
 func (s *RolesService) List(ctx context.Context) (map[string]string, *Response, error) {
 	return s.res().list(ctx)
 }
+
+// Environments lists the environments for which the role has an
+// environment-specific run list (always including "_default").
+func (s *RolesService) Environments(ctx context.Context, role string) ([]string, *Response, error) {
+	return do[[]string](ctx, s.client, "GET",
+		s.client.orgPath("/roles/"+role+"/environments"), nil)
+}
+
+// EnvironmentRunList returns the role's run list for one environment
+// (env_run_lists[env], or the default run_list when env is "_default").
+func (s *RolesService) EnvironmentRunList(ctx context.Context, role, env string) ([]string, *Response, error) {
+	rl, resp, err := do[runListBody](ctx, s.client, "GET",
+		s.client.orgPath("/roles/"+role+"/environments/"+env), nil)
+	return rl.RunList, resp, err
+}

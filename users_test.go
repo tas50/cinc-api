@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -140,5 +141,37 @@ func TestUsers_PathsAreTopLevel(t *testing.T) {
 	c := newTestClient(t, srv.Server)
 	if _, _, err := c.Users.List(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUsers_Authenticate_OK(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /authenticate_user", cinctest.Route{
+		Body: `{}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			var got map[string]string
+			json.Unmarshal(body, &got)
+			if got["username"] != "grantmc" || got["password"] != "p@ss" {
+				t.Errorf("POST body = %v", got)
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	if _, err := c.Users.Authenticate(context.Background(), "grantmc", "p@ss"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+}
+
+func TestUsers_Authenticate_BadPassword(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /authenticate_user",
+		cinctest.Route{Status: 401, Body: `{"error":["Failed to authenticate."]}`})
+	c := newTestClient(t, srv.Server)
+	_, err := c.Users.Authenticate(context.Background(), "grantmc", "wrong")
+	if err == nil {
+		t.Fatal("expected 401")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
 }

@@ -66,3 +66,12 @@ func (s *UsersService) Delete(ctx context.Context, name string) (*Response, erro
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE", "/users/"+name, nil)
 	return resp, err
 }
+
+// Authenticate verifies a user's username and password against the top-level
+// /authenticate_user endpoint. A nil error means the credentials are valid; a
+// 401 is reported as an error wrapping ErrUnauthorized.
+func (s *UsersService) Authenticate(ctx context.Context, username, password string) (*Response, error) {
+	_, resp, err := do[map[string]any](ctx, s.client, "POST", "/authenticate_user",
+		map[string]string{"username": username, "password": password})
+	return resp, err
+}
