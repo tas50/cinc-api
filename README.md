@@ -27,8 +27,8 @@ following endpoint families are implemented:
 | `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission                                                  |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
-| `c.Cookbooks`        | `/cookbooks`                          | List / Get / Delete / Upload (sandbox flow) / Download               |
-| `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / Get / Delete / Upload                                         |
+| `c.Cookbooks`        | `/cookbooks`                          | List / Get (with metadata) / Delete / Upload (sandbox flow) / Download |
+| `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / Get (with metadata) / Delete / Upload                         |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD                |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete                                |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |

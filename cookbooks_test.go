@@ -40,6 +40,96 @@ func TestCookbooks_GetAndList(t *testing.T) {
 	}
 }
 
+// Get parses the cookbook version's metadata object — the description,
+// maintainer, license, and dependency information the server returns in the
+// same response as the file manifest.
+func TestCookbooks_GetParsesMetadata(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbooks/apache2/8.6.0",
+		cinctest.Route{Body: `{
+			"cookbook_name": "apache2",
+			"name": "apache2-8.6.0",
+			"version": "8.6.0",
+			"metadata": {
+				"name": "apache2",
+				"version": "8.6.0",
+				"description": "Installs and configures apache2",
+				"long_description": "A longer story about apache2.",
+				"maintainer": "Sous Chefs",
+				"maintainer_email": "help@sous-chefs.org",
+				"license": "Apache-2.0",
+				"source_url": "https://github.com/sous-chefs/apache2",
+				"issues_url": "https://github.com/sous-chefs/apache2/issues",
+				"privacy": false,
+				"dependencies": {"logrotate": ">= 0.0.0", "iptables": ">= 1.0"},
+				"platforms": {"redhat": ">= 0.0.0"},
+				"providing": {"apache2": ">= 0.0.0"},
+				"recipes": {"apache2::default": "Installs apache2"},
+				"chef_versions": [[">= 13.0"]],
+				"ohai_versions": [],
+				"gems": []
+			}
+		}`})
+
+	c := newTestClient(t, srv.Server)
+	cb, _, err := c.Cookbooks.Get(context.Background(), "apache2", "8.6.0")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	m := cb.Metadata
+	if m.Description != "Installs and configures apache2" {
+		t.Errorf("Description = %q", m.Description)
+	}
+	if m.LongDescription != "A longer story about apache2." {
+		t.Errorf("LongDescription = %q", m.LongDescription)
+	}
+	if m.Maintainer != "Sous Chefs" || m.MaintainerEmail != "help@sous-chefs.org" {
+		t.Errorf("maintainer = %q <%q>", m.Maintainer, m.MaintainerEmail)
+	}
+	if m.License != "Apache-2.0" {
+		t.Errorf("License = %q", m.License)
+	}
+	if m.SourceURL != "https://github.com/sous-chefs/apache2" {
+		t.Errorf("SourceURL = %q", m.SourceURL)
+	}
+	if m.IssuesURL != "https://github.com/sous-chefs/apache2/issues" {
+		t.Errorf("IssuesURL = %q", m.IssuesURL)
+	}
+	if m.Dependencies["logrotate"] != ">= 0.0.0" || m.Dependencies["iptables"] != ">= 1.0" {
+		t.Errorf("Dependencies = %+v", m.Dependencies)
+	}
+	if m.Platforms["redhat"] != ">= 0.0.0" {
+		t.Errorf("Platforms = %+v", m.Platforms)
+	}
+	if m.Providing["apache2"] != ">= 0.0.0" {
+		t.Errorf("Providing = %+v", m.Providing)
+	}
+	if m.Recipes["apache2::default"] != "Installs apache2" {
+		t.Errorf("Recipes = %+v", m.Recipes)
+	}
+	if len(m.ChefVersions) != 1 || len(m.ChefVersions[0]) != 1 || m.ChefVersions[0][0] != ">= 13.0" {
+		t.Errorf("ChefVersions = %+v", m.ChefVersions)
+	}
+}
+
+// A server (or shape) that omits the metadata object leaves Metadata as its
+// zero value rather than failing the decode.
+func TestCookbooks_GetWithoutMetadata(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbooks/bare/1.0.0",
+		cinctest.Route{Body: `{"cookbook_name":"bare","name":"bare-1.0.0","version":"1.0.0"}`})
+
+	c := newTestClient(t, srv.Server)
+	cb, _, err := c.Cookbooks.Get(context.Background(), "bare", "1.0.0")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if cb.Metadata.Description != "" || len(cb.Metadata.Dependencies) != 0 {
+		t.Errorf("expected zero-value metadata, got %+v", cb.Metadata)
+	}
+}
+
 func TestCookbooks_Download(t *testing.T) {
 	// The fake server doubles as: (a) the Chef API endpoint that returns the
 	// manifest, and (b) the "bookshelf" that serves the pre-signed file URLs.

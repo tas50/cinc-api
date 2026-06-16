@@ -32,6 +32,41 @@ type CookbookFileRef struct {
 	URL         string `json:"url"`
 }
 
+// CookbookMetadata is the cookbook's metadata block, as compiled from its
+// metadata.rb/metadata.json and returned inside a cookbook version manifest.
+// Every field is optional — older cookbooks and trimmed server responses may
+// populate only some of them.
+type CookbookMetadata struct {
+	Name            string `json:"name,omitempty"`
+	Version         string `json:"version,omitempty"`
+	Description     string `json:"description,omitempty"`
+	LongDescription string `json:"long_description,omitempty"`
+	Maintainer      string `json:"maintainer,omitempty"`
+	MaintainerEmail string `json:"maintainer_email,omitempty"`
+	License         string `json:"license,omitempty"`
+	SourceURL       string `json:"source_url,omitempty"`
+	IssuesURL       string `json:"issues_url,omitempty"`
+	Privacy         bool   `json:"privacy,omitempty"`
+
+	// Constraint maps: key -> version constraint string (e.g. ">= 1.0.0").
+	Dependencies map[string]string `json:"dependencies,omitempty"`
+	Platforms    map[string]string `json:"platforms,omitempty"`
+	Providing    map[string]string `json:"providing,omitempty"`
+	// Recipes maps a recipe name to its human description.
+	Recipes map[string]string `json:"recipes,omitempty"`
+
+	// Attributes and Groupings are free-form nested structures kept as-is so
+	// no information is lost; their inner shape is cookbook-defined.
+	Attributes map[string]any `json:"attributes,omitempty"`
+	Groupings  map[string]any `json:"groupings,omitempty"`
+
+	// Version-constraint lists, each an array of constraint tokens
+	// (e.g. [[">= 13.0", "< 19.0"]] for chef_versions).
+	ChefVersions [][]string `json:"chef_versions,omitempty"`
+	OhaiVersions [][]string `json:"ohai_versions,omitempty"`
+	Gems         [][]string `json:"gems,omitempty"`
+}
+
 // Cookbook is a single cookbook version's manifest as returned by the server.
 // A server returns files in one of two shapes: the per-segment slices (the
 // classic cookbook_version layout) or the flat AllFilesManifest ("all_files",
@@ -41,6 +76,12 @@ type Cookbook struct {
 	CookbookName string `json:"cookbook_name"`
 	Name         string `json:"name"`
 	Version      string `json:"version"`
+
+	// Metadata is the cookbook's compiled metadata (description, maintainer,
+	// license, dependencies, …), returned by the server alongside the file
+	// manifest. omitzero keeps an empty block out of any re-encoded manifest,
+	// since omitempty does not elide a zero-valued nested struct.
+	Metadata CookbookMetadata `json:"metadata,omitzero"`
 
 	// AllFilesManifest is the flat "all_files" file list. Cookbooks uploaded by
 	// this client use it, and modern servers return it on Get.
