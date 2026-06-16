@@ -96,6 +96,81 @@ func TestACLs_AcceptsAnyObjectType(t *testing.T) {
 	}
 }
 
+func TestACLs_GetOrg(t *testing.T) {
+	// The organization object's own ACL lives at /organizations/ORG/_acl,
+	// with no object-type segment.
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/_acl", cinctest.Route{
+		Body: `{"read":{"actors":[],"groups":["admins"]}}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	acl, _, err := c.ACLs.GetOrg(context.Background())
+	if err != nil {
+		t.Fatalf("GetOrg: %v", err)
+	}
+	if !reflect.DeepEqual(acl.Read.Groups, []string{"admins"}) {
+		t.Errorf("read.groups = %v", acl.Read.Groups)
+	}
+}
+
+func TestACLs_SetOrgPermission(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("PUT /organizations/o/_acl/grant", cinctest.Route{
+		Body: `{}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			var req map[string]ACE
+			json.Unmarshal(body, &req)
+			if !reflect.DeepEqual(req["grant"].Groups, []string{"admins"}) {
+				t.Errorf("PUT body = %s", body)
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	if err := c.ACLs.SetOrgPermission(context.Background(), "grant", &ACE{
+		Groups: []string{"admins"},
+	}); err != nil {
+		t.Fatalf("SetOrgPermission: %v", err)
+	}
+}
+
+func TestACLs_GetUser(t *testing.T) {
+	// A global user's ACL is top-level, not org-scoped.
+	srv := cinctest.New(t)
+	srv.Handle("GET /users/janedoe/_acl", cinctest.Route{
+		Body: `{"update":{"actors":["janedoe"],"groups":[]}}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	acl, _, err := c.ACLs.GetUser(context.Background(), "janedoe")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if !reflect.DeepEqual(acl.Update.Actors, []string{"janedoe"}) {
+		t.Errorf("update.actors = %v", acl.Update.Actors)
+	}
+}
+
+func TestACLs_SetUserPermission(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("PUT /users/janedoe/_acl/grant", cinctest.Route{
+		Body: `{}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			var req map[string]ACE
+			json.Unmarshal(body, &req)
+			if !reflect.DeepEqual(req["grant"].Actors, []string{"janedoe"}) {
+				t.Errorf("PUT body = %s", body)
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	if err := c.ACLs.SetUserPermission(context.Background(), "janedoe", "grant", &ACE{
+		Actors: []string{"janedoe"},
+	}); err != nil {
+		t.Fatalf("SetUserPermission: %v", err)
+	}
+}
+
 func TestACLs_GetNotFound(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("GET /organizations/o/nodes/missing/_acl",

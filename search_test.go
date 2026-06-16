@@ -225,3 +225,23 @@ func TestSearch_All(t *testing.T) {
 		t.Fatalf("SearchAll: %d rows, %v", len(rows), err)
 	}
 }
+
+func TestSearch_Indexes(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search", cinctest.Route{
+		Body: `{
+			"node":"https://x/organizations/o/search/node",
+			"role":"https://x/organizations/o/search/role",
+			"client":"https://x/organizations/o/search/client"
+		}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	idx, _, err := c.Search.Indexes(context.Background())
+	if err != nil {
+		t.Fatalf("Indexes: %v", err)
+	}
+	if idx["node"] == "" || idx["role"] == "" || idx["client"] == "" {
+		t.Fatalf("Indexes = %v", idx)
+	}
+}

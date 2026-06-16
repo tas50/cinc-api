@@ -24,13 +24,14 @@ following endpoint families are implemented:
 
 | Service              | Path                                  | Methods                                                              |
 | -------------------- | ------------------------------------- | -------------------------------------------------------------------- |
-| `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission                                                  |
+| `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission; org-level (`GetOrg`/`SetOrgPermission`) and global-user (`GetUser`/`SetUserPermission`) |
+| `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
-| `c.Cookbooks`        | `/cookbooks`                          | List / Get (with metadata) / Delete / Upload (sandbox flow) / Download |
+| `c.Cookbooks`        | `/cookbooks`                          | List / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / Get (with metadata) / Delete / Upload                         |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD                |
-| `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete                                |
+| `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
 | `c.License`          | `/license`                            | Get (node-license usage)                                             |
@@ -38,11 +39,14 @@ following endpoint families are implemented:
 | `c.Orgs`             | `/organizations` (top-level)          | List / Get / Create / Update / Delete                                |
 | `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision / PushRevision |
 | `c.PolicyGroups`     | `/policy_groups`                      | List / Get / Delete / GetPolicy / PutPolicy / DeletePolicy           |
+| `c.Principals`       | `/principals/<name>`                  | Get (public key(s) + type for a user/client)                        |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
-| `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete                                |
-| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`), `SearchAll`     |
+| `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete / Environments / EnvironmentRunList |
+| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`), `SearchAll`, `Indexes` |
+| `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
-| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete                                |
+| `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
+| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / Authenticate                 |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`. Idempotent GETs

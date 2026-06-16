@@ -40,3 +40,35 @@ func TestRoles_CRUD(t *testing.T) {
 		t.Fatalf("List: %+v %v", names, err)
 	}
 }
+
+func TestRoles_Environments(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/roles/web/environments", cinctest.Route{
+		Body: `["_default","production","qa"]`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	envs, _, err := c.Roles.Environments(context.Background(), "web")
+	if err != nil {
+		t.Fatalf("Environments: %v", err)
+	}
+	if len(envs) != 3 || envs[1] != "production" {
+		t.Fatalf("Environments = %v", envs)
+	}
+}
+
+func TestRoles_EnvironmentRunList(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/roles/web/environments/production", cinctest.Route{
+		Body: `{"run_list":["recipe[nginx]","recipe[app]"]}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	rl, _, err := c.Roles.EnvironmentRunList(context.Background(), "web", "production")
+	if err != nil {
+		t.Fatalf("EnvironmentRunList: %v", err)
+	}
+	if len(rl) != 2 || rl[1] != "recipe[app]" {
+		t.Fatalf("EnvironmentRunList = %v", rl)
+	}
+}

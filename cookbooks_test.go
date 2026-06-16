@@ -500,3 +500,35 @@ func TestCookbooks_UploadRoundTrip(t *testing.T) {
 		t.Errorf("manifest missing chef_type=cookbook_version: %s", body)
 	}
 }
+
+func TestCookbooks_ListLatest(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbooks/_latest", cinctest.Route{
+		Body: `{"apache2":"https://x/cookbooks/apache2/5.1.0","nginx":"https://x/cookbooks/nginx/1.0.0"}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	latest, _, err := c.Cookbooks.ListLatest(context.Background())
+	if err != nil {
+		t.Fatalf("ListLatest: %v", err)
+	}
+	if latest["apache2"] == "" || latest["nginx"] == "" {
+		t.Fatalf("ListLatest = %v", latest)
+	}
+}
+
+func TestCookbooks_ListRecipes(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbooks/_recipes", cinctest.Route{
+		Body: `["apache2","apache2::mod_ssl","nginx"]`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	recipes, _, err := c.Cookbooks.ListRecipes(context.Background())
+	if err != nil {
+		t.Fatalf("ListRecipes: %v", err)
+	}
+	if len(recipes) != 3 || recipes[1] != "apache2::mod_ssl" {
+		t.Fatalf("ListRecipes = %v", recipes)
+	}
+}
