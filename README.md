@@ -28,8 +28,8 @@ following endpoint families are implemented:
 | `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
-| `c.Cookbooks`        | `/cookbooks`                          | List / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
-| `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / Get (with metadata) / Delete / Upload                         |
+| `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
+| `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD                |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |

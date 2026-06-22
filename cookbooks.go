@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,6 +157,27 @@ func (s *CookbooksService) ListLatest(ctx context.Context) (map[string]string, *
 func (s *CookbooksService) ListRecipes(ctx context.Context) ([]string, *Response, error) {
 	return do[[]string](ctx, s.client, "GET",
 		s.client.orgPath("/cookbooks/_recipes"), nil)
+}
+
+// GetVersions returns the available versions of a single cookbook
+// (GET /cookbooks/NAME), unwrapped from the server's single-key
+// {name: {url, versions}} envelope. numVersions limits the versions returned
+// ("" for the server default of one, "all" for every version, or "n");
+// versions come back newest-first.
+func (s *CookbooksService) GetVersions(ctx context.Context, name, numVersions string) (*CookbookListEntry, *Response, error) {
+	path := s.client.orgPath("/cookbooks/" + name)
+	if numVersions != "" {
+		path += "?num_versions=" + url.QueryEscape(numVersions)
+	}
+	m, resp, err := do[map[string]CookbookListEntry](ctx, s.client, "GET", path, nil)
+	if err != nil {
+		return nil, resp, err
+	}
+	entry, ok := m[name]
+	if !ok {
+		return nil, resp, fmt.Errorf("cinc: cookbook %q missing from response", name)
+	}
+	return &entry, resp, nil
 }
 
 // Get retrieves a single cookbook version manifest.

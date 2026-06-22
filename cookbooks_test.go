@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,71 @@ import (
 
 	"github.com/tas50/cinc-api/internal/cinctest"
 )
+
+func TestCookbooks_GetVersions(t *testing.T) {
+	t.Run("unwraps single-key envelope and sends num_versions", func(t *testing.T) {
+		srv := cinctest.New(t)
+		var gotNumVersions string
+		srv.Handle("GET /organizations/o/cookbooks/apache2", cinctest.Route{
+			Body: `{"apache2":{"url":"http://x/apache2","versions":[` +
+				`{"url":"http://x/apache2/5.1.0","version":"5.1.0"},` +
+				`{"url":"http://x/apache2/4.2.0","version":"4.2.0"}]}}`,
+			Assert: func(t *testing.T, r *http.Request, _ []byte) {
+				gotNumVersions = r.URL.Query().Get("num_versions")
+			},
+		})
+		c := newTestClient(t, srv.Server)
+
+		entry, resp, err := c.Cookbooks.GetVersions(context.Background(), "apache2", "all")
+		if err != nil {
+			t.Fatalf("GetVersions: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+		if gotNumVersions != "all" {
+			t.Errorf("num_versions = %q, want all", gotNumVersions)
+		}
+		if entry == nil || len(entry.Versions) != 2 || entry.Versions[0].Version != "5.1.0" {
+			t.Fatalf("entry = %+v, want 2 versions newest-first", entry)
+		}
+	})
+
+	t.Run("omits num_versions when empty", func(t *testing.T) {
+		srv := cinctest.New(t)
+		var hadParam bool
+		srv.Handle("GET /organizations/o/cookbooks/nginx", cinctest.Route{
+			Body: `{"nginx":{"url":"http://x/nginx","versions":[{"url":"http://x/nginx/1.0.0","version":"1.0.0"}]}}`,
+			Assert: func(t *testing.T, r *http.Request, _ []byte) {
+				_, hadParam = r.URL.Query()["num_versions"]
+			},
+		})
+		c := newTestClient(t, srv.Server)
+
+		if _, _, err := c.Cookbooks.GetVersions(context.Background(), "nginx", ""); err != nil {
+			t.Fatalf("GetVersions: %v", err)
+		}
+		if hadParam {
+			t.Error("num_versions should be absent when numVersions is empty")
+		}
+	})
+
+	t.Run("propagates 404", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /organizations/o/cookbooks/missing", cinctest.Route{
+			Status: 404, Body: `{"error":["not found"]}`,
+		})
+		c := newTestClient(t, srv.Server)
+
+		entry, _, err := c.Cookbooks.GetVersions(context.Background(), "missing", "")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+		if entry != nil {
+			t.Errorf("entry = %+v, want nil on error", entry)
+		}
+	})
+}
 
 func TestCookbooks_GetAndList(t *testing.T) {
 	srv := cinctest.New(t)
