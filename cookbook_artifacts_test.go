@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +11,45 @@ import (
 
 	"github.com/tas50/cinc-api/internal/cinctest"
 )
+
+func TestCookbookArtifacts_GetVersions(t *testing.T) {
+	t.Run("unwraps single-key envelope", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /organizations/o/cookbook_artifacts/rabbitmq", cinctest.Route{
+			Body: `{"rabbitmq":{"url":"http://x/rabbitmq","versions":[` +
+				`{"url":"http://x/rabbitmq/0bd7","identifier":"0bd7"},` +
+				`{"url":"http://x/rabbitmq/0e10","identifier":"0e10"}]}}`,
+		})
+		c := newTestClient(t, srv.Server)
+
+		entry, resp, err := c.CookbookArtifacts.GetVersions(context.Background(), "rabbitmq")
+		if err != nil {
+			t.Fatalf("GetVersions: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+		if entry == nil || len(entry.Versions) != 2 || entry.Versions[0].Identifier != "0bd7" {
+			t.Fatalf("entry = %+v, want 2 identifiers", entry)
+		}
+	})
+
+	t.Run("propagates 404", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /organizations/o/cookbook_artifacts/missing", cinctest.Route{
+			Status: 404, Body: `{"error":["not found"]}`,
+		})
+		c := newTestClient(t, srv.Server)
+
+		entry, _, err := c.CookbookArtifacts.GetVersions(context.Background(), "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+		if entry != nil {
+			t.Errorf("entry = %+v, want nil on error", entry)
+		}
+	})
+}
 
 func TestCookbookArtifacts_Upload_ErrorWrapped(t *testing.T) {
 	// Build a minimal cookbook so LocalCookbookFromDir succeeds, then have the

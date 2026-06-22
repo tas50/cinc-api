@@ -27,6 +27,22 @@ func (s *CookbookArtifactsService) List(ctx context.Context) (map[string]Cookboo
 		s.client.orgPath("/cookbook_artifacts"), nil)
 }
 
+// GetVersions returns the available identifiers of a single cookbook artifact
+// (GET /cookbook_artifacts/NAME), unwrapped from the server's single-key
+// {name: {url, versions}} envelope.
+func (s *CookbookArtifactsService) GetVersions(ctx context.Context, name string) (*CookbookArtifactListEntry, *Response, error) {
+	m, resp, err := do[map[string]CookbookArtifactListEntry](ctx, s.client, "GET",
+		s.client.orgPath("/cookbook_artifacts/"+name), nil)
+	if err != nil {
+		return nil, resp, err
+	}
+	entry, ok := m[name]
+	if !ok {
+		return nil, resp, fmt.Errorf("cinc: cookbook artifact %q missing from response", name)
+	}
+	return &entry, resp, nil
+}
+
 // Get retrieves a single cookbook artifact by name and identifier.
 func (s *CookbookArtifactsService) Get(ctx context.Context, name, identifier string) (*Cookbook, *Response, error) {
 	cb, resp, err := do[Cookbook](ctx, s.client, "GET",
