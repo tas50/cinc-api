@@ -19,8 +19,14 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([
 	var attempt int
 	for {
 		data, resp, err := c.doOnce(ctx, method, path, body)
-		retriable := err == nil && resp != nil && resp.StatusCode >= 500
-		if (retriable || isNetErr(err)) && method == http.MethodGet && attempt < c.opts.maxRetries {
+		// Retry only transient failures: a 5xx response, or a genuine transport
+		// error (no HTTP response at all). A non-2xx response surfaces as a
+		// non-nil err *with* resp set, so gate the network-error check on
+		// resp == nil — otherwise every 4xx (not-found, forbidden, ...) would be
+		// retried, since isNetErr treats any non-context error as retriable.
+		serverErr := resp != nil && resp.StatusCode >= 500
+		netErr := resp == nil && isNetErr(err)
+		if (serverErr || netErr) && method == http.MethodGet && attempt < c.opts.maxRetries {
 			attempt++
 			continue
 		}

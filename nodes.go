@@ -77,12 +77,13 @@ func (n *Node) RemoveRunListItems(items ...string) {
 }
 
 // Attribute looks up an attribute by name across the node's precedence levels,
-// returning the first match in automatic → normal → default → override order
-// (automatic, the highest read precedence, wins). The name may be a
-// dot-separated path into nested attributes (e.g. "network.default_gateway").
+// returning the first match in Chef read-precedence order — automatic →
+// override → normal → default (automatic, the highest precedence, wins). The
+// name may be a dot-separated path into nested attributes
+// (e.g. "network.default_gateway").
 func (n *Node) Attribute(name string) (any, bool) {
 	path := strings.Split(name, ".")
-	for _, scope := range []Attributes{n.Automatic, n.Normal, n.Default, n.Override} {
+	for _, scope := range []Attributes{n.Automatic, n.Override, n.Normal, n.Default} {
 		if scope == nil {
 			continue
 		}
