@@ -46,6 +46,48 @@ type CookbookLock struct {
 	SourceOptions           map[string]any  `json:"source_options,omitempty"`
 }
 
+// SourceKind identifies how a Policyfile cookbook lock is sourced. The values
+// match the source_options keys Chef writes into a Policyfile.lock.json.
+type SourceKind string
+
+const (
+	SourcePath           SourceKind = "path"
+	SourceArtifactserver SourceKind = "artifactserver"
+	SourceGit            SourceKind = "git"
+	SourceChefServer     SourceKind = "chef_server"
+)
+
+// Origin reports how the locked cookbook is sourced and the associated
+// location — a filesystem path, a git URL, an artifactserver URL, or a chef
+// server URL — read from source_options. When more than one source key is
+// present they are preferred in the order path, artifactserver, git,
+// chef_server. It returns an error if no recognized source key is present or
+// its value is not a string.
+func (l CookbookLock) Origin() (SourceKind, string, error) {
+	for _, k := range []SourceKind{SourcePath, SourceArtifactserver, SourceGit, SourceChefServer} {
+		v, ok := l.SourceOptions[string(k)]
+		if !ok {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			return "", "", fmt.Errorf("cinc: source_options.%s is not a string", k)
+		}
+		return k, s, nil
+	}
+	return "", "", fmt.Errorf("cinc: unsupported or missing cookbook source in source_options")
+}
+
+// PinnedVersion returns the version the lock pins: the source_options
+// "version" when present and non-empty, otherwise the lock's top-level
+// Version.
+func (l CookbookLock) PinnedVersion() string {
+	if v, ok := l.SourceOptions["version"].(string); ok && v != "" {
+		return v
+	}
+	return l.Version
+}
+
 // PoliciesService accesses the /policies endpoints.
 type PoliciesService struct{ client *Client }
 

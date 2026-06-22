@@ -157,3 +157,61 @@ func TestPolicies_NotFound(t *testing.T) {
 		t.Fatal("expected 404")
 	}
 }
+
+func TestCookbookLock_Origin(t *testing.T) {
+	cases := []struct {
+		name      string
+		opts      map[string]any
+		wantKind  SourceKind
+		wantValue string
+		wantErr   bool
+	}{
+		{"path", map[string]any{"path": "../base"}, SourcePath, "../base", false},
+		{"git", map[string]any{"git": "https://example.test/base.git"}, SourceGit, "https://example.test/base.git", false},
+		{"artifactserver", map[string]any{"artifactserver": "https://supermarket.test/api/v1/cookbooks/base/versions/1_0_0/download"}, SourceArtifactserver, "https://supermarket.test/api/v1/cookbooks/base/versions/1_0_0/download", false},
+		{"chef_server", map[string]any{"chef_server": "https://chef.test/organizations/o"}, SourceChefServer, "https://chef.test/organizations/o", false},
+		{"path wins over artifactserver", map[string]any{"path": "../base", "artifactserver": "https://x/"}, SourcePath, "../base", false},
+		{"missing", map[string]any{"version": "1.0.0"}, "", "", true},
+		{"empty", map[string]any{}, "", "", true},
+		{"non-string value", map[string]any{"git": 42}, "", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lock := CookbookLock{SourceOptions: tc.opts}
+			kind, value, err := lock.Origin()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Origin() = (%q, %q, nil), want error", kind, value)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Origin() error = %v", err)
+			}
+			if kind != tc.wantKind || value != tc.wantValue {
+				t.Fatalf("Origin() = (%q, %q), want (%q, %q)", kind, value, tc.wantKind, tc.wantValue)
+			}
+		})
+	}
+}
+
+func TestCookbookLock_PinnedVersion(t *testing.T) {
+	cases := []struct {
+		name string
+		lock CookbookLock
+		want string
+	}{
+		{"source_options version wins", CookbookLock{Version: "1.0.0", SourceOptions: map[string]any{"version": "2.0.0"}}, "2.0.0"},
+		{"falls back to top-level version", CookbookLock{Version: "1.0.0", SourceOptions: map[string]any{"git": "x"}}, "1.0.0"},
+		{"empty source_options version ignored", CookbookLock{Version: "1.0.0", SourceOptions: map[string]any{"version": ""}}, "1.0.0"},
+		{"non-string source_options version ignored", CookbookLock{Version: "1.0.0", SourceOptions: map[string]any{"version": 2}}, "1.0.0"},
+		{"nil source_options", CookbookLock{Version: "1.0.0"}, "1.0.0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.lock.PinnedVersion(); got != tc.want {
+				t.Fatalf("PinnedVersion() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
