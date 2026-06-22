@@ -237,6 +237,32 @@ func TestRetry_Exhausted(t *testing.T) {
 	}
 }
 
+// TestRetry_4xxNotRetried asserts that 4xx GET responses are NOT retried:
+// they are not transient, so the server must be hit exactly once. This guards
+// the isNetErr/serverErr split — without it every not-found/forbidden lookup
+// silently incurs maxRetries extra round trips.
+func TestRetry_4xxNotRetried(t *testing.T) {
+	for _, code := range []int{400, 401, 403, 404, 409} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(code)
+				w.Write([]byte(`{"error":["nope"]}`))
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			type obj struct{}
+			if _, _, err := do[obj](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
+				t.Fatalf("expected error for %d", code)
+			}
+			if n := hits.Load(); n != 1 {
+				t.Fatalf("%d GET hit server %d times, want 1 (4xx must not be retried)", code, n)
+			}
+		})
+	}
+}
+
 func TestTransport_SetsChefHeaders(t *testing.T) {
 	var headers http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

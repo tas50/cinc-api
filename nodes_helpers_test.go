@@ -116,6 +116,45 @@ func TestNodeAttribute(t *testing.T) {
 			t.Errorf("Attribute(only_override) = (%v, %v), want o", v, ok)
 		}
 	})
+	// Chef read precedence (highest -> lowest): automatic, override, normal,
+	// default. These cases pin a single key into multiple scopes at once so the
+	// ordering — not just fall-through — is exercised.
+	t.Run("override outranks normal", func(t *testing.T) {
+		n := &Node{
+			Normal:   Attributes{"k": "from_normal"},
+			Override: Attributes{"k": "from_override"},
+		}
+		if v, ok := n.Attribute("k"); !ok || v != "from_override" {
+			t.Errorf("Attribute(k) = (%v, %v), want from_override", v, ok)
+		}
+	})
+	t.Run("override outranks default", func(t *testing.T) {
+		n := &Node{
+			Default:  Attributes{"k": "from_default"},
+			Override: Attributes{"k": "from_override"},
+		}
+		if v, ok := n.Attribute("k"); !ok || v != "from_override" {
+			t.Errorf("Attribute(k) = (%v, %v), want from_override", v, ok)
+		}
+	})
+	t.Run("normal outranks default", func(t *testing.T) {
+		n := &Node{
+			Default: Attributes{"k": "from_default"},
+			Normal:  Attributes{"k": "from_normal"},
+		}
+		if v, ok := n.Attribute("k"); !ok || v != "from_normal" {
+			t.Errorf("Attribute(k) = (%v, %v), want from_normal", v, ok)
+		}
+	})
+	t.Run("automatic outranks override", func(t *testing.T) {
+		n := &Node{
+			Override:  Attributes{"k": "from_override"},
+			Automatic: Attributes{"k": "from_automatic"},
+		}
+		if v, ok := n.Attribute("k"); !ok || v != "from_automatic" {
+			t.Errorf("Attribute(k) = (%v, %v), want from_automatic", v, ok)
+		}
+	})
 	t.Run("dotted nested path", func(t *testing.T) {
 		if v, ok := n.Attribute("network.default_gateway"); !ok || v != "10.0.0.1" {
 			t.Errorf("Attribute(network.default_gateway) = (%v, %v), want 10.0.0.1", v, ok)
