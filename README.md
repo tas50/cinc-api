@@ -68,6 +68,10 @@ model, so callers don't re-encode server conventions:
   the new private key.
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a
   `Policyfile.lock.json` into a `PolicyRevision`.
+- `CookbookLock` accessors — `Origin()` (classify a lock's `source_options` as
+  `path`/`artifactserver`/`git`/`chef_server` and return its location) and
+  `PinnedVersion()` (the `source_options` version, falling back to the lock's
+  top-level version).
 - `Policies.PushRevision(lockJSON, group, cookbooks)` — the server-side half of
   `chef push`: upload each pinned cookbook as an artifact, then associate the
   revision with a policy group. The lock bytes are sent verbatim so no fields
