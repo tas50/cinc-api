@@ -52,6 +52,14 @@ small, flat, and idiomatic — keep it that way.
   including the test-only `cinctest` package use
   `go test ./... -coverpkg=./... -coverprofile=...`.
 - `go vet ./...` must be clean.
+- **Integration tests live in `integration/`, a *separate* Go module**
+  (its own `go.mod`, so the cinc-zero test dependency never reaches
+  consumers of this package — the root import stays zero-dependency).
+  The root `go test ./...` does **not** run them. Run them with
+  `cd integration && go test ./...` (~1s); they boot an in-memory
+  cinc-zero server and exercise the real wire protocol end-to-end,
+  unlike the `cinctest` fake the unit tests use. Run them when you
+  touch the transport, signing, or cookbook-upload paths.
 
 ## Auth and transport gotchas
 
