@@ -343,18 +343,16 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 // LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
 // pass to CookbooksService.Upload (or, with an identifier,
 // CookbookArtifactsService.Upload). The cookbook name is taken from the base
-// name of dir. Every file under dir is read and checksummed; an empty directory
-// is an error.
+// name of dir. Every file under dir is read and checksummed, except those
+// excluded by a chefignore file at the cookbook root — matching knife, an
+// uploaded cookbook omits chefignored files. An empty directory is an error.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	cb := &LocalCookbook{Name: filepath.Base(dir), Version: version}
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		content, err := os.ReadFile(path)
+	ignore, err := LoadChefignore(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cinc: read chefignore: %w", err)
+	}
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -362,8 +360,24 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			// Prune whole subtrees a chefignore pattern excludes (e.g. a bare
+			// directory name like `.kitchen`), so their files are never read.
+			if rel != "." && ignore.Ignores(rel) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if ignore.Ignores(rel) {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
 		cb.files = append(cb.files, cookbookFile{
-			name: filepath.ToSlash(rel), content: content, checksum: md5Hex(content),
+			name: rel, content: content, checksum: md5Hex(content),
 		})
 		return nil
 	})

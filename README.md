@@ -81,6 +81,15 @@ model, so callers don't re-encode server conventions:
   `chef push`: upload each pinned cookbook as an artifact, then associate the
   revision with a policy group. The lock bytes are sent verbatim so no fields
   are lost.
+- `LoadChefignore(dir)` / `Chefignore.Ignores(relPath)` — knife's chefignore
+  matcher (full path, basename, and ancestor-directory globs), so cookbook
+  uploads, archives, and identifier computation agree on which files belong to
+  a cookbook. `LocalCookbookFromDir` honors it, so chefignored files are
+  excluded from an upload.
+- `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
+  permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
+  groups (reporting whether anything changed), and `ExpandPerm("all")` expands
+  to the five standard permissions — the reusable core of an ACL grant/revoke.
 
 ## License
 
