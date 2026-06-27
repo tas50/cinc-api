@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -365,6 +366,41 @@ func TestCookbook_AllFiles_ParsesAllFilesManifest(t *testing.T) {
 	}
 	if files[0].Path != "recipes/default.rb" || files[0].URL != "http://x/abc" {
 		t.Errorf("first file = %+v", files[0])
+	}
+}
+
+func TestLocalCookbookFromDir_ExcludesChefignored(t *testing.T) {
+	// A cookbook with a chefignore must omit ignored files from the upload set
+	// — previously LocalCookbookFromDir uploaded everything under the directory.
+	dir := t.TempDir()
+	root := filepath.Join(dir, "nginx")
+	os.MkdirAll(filepath.Join(root, "recipes"), 0o755)
+	os.MkdirAll(filepath.Join(root, ".kitchen"), 0o755)
+	files := map[string]string{
+		"metadata.rb":         "name 'nginx'\n",
+		"chefignore":          "*.bak\n.kitchen\n",
+		"recipes/default.rb":  "package 'nginx'\n",
+		"recipes/default.bak": "old\n",
+		".kitchen/state.yml":  "state\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	var got []string
+	for _, f := range cb.files {
+		got = append(got, f.name)
+	}
+	slices.Sort(got)
+	want := []string{"chefignore", "metadata.rb", "recipes/default.rb"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("uploaded files = %v, want %v (chefignored files must be omitted)", got, want)
 	}
 }
 

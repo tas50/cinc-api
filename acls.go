@@ -1,12 +1,85 @@
 package cinc
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"slices"
+)
 
 // ACE is a single access-control entry: the actors (users/clients by name)
 // and groups granted one permission on one object.
 type ACE struct {
 	Actors []string `json:"actors"`
 	Groups []string `json:"groups"`
+}
+
+// AddMembers adds each actor and group to the ACE in place, skipping any that
+// are already present, and reports whether the ACE changed. It is the "grant"
+// half of an ACL read-modify-write.
+func (a *ACE) AddMembers(actors, groups []string) (changed bool) {
+	if addMembers(&a.Actors, actors) {
+		changed = true
+	}
+	if addMembers(&a.Groups, groups) {
+		changed = true
+	}
+	return changed
+}
+
+// RemoveMembers removes each actor and group from the ACE in place, ignoring
+// any that are absent, and reports whether the ACE changed. It is the "revoke"
+// half of an ACL read-modify-write.
+func (a *ACE) RemoveMembers(actors, groups []string) (changed bool) {
+	if removeMembers(&a.Actors, actors) {
+		changed = true
+	}
+	if removeMembers(&a.Groups, groups) {
+		changed = true
+	}
+	return changed
+}
+
+// addMembers appends each member missing from list (deduping), reporting
+// whether list changed.
+func addMembers(list *[]string, members []string) bool {
+	changed := false
+	for _, m := range members {
+		if !slices.Contains(*list, m) {
+			*list = append(*list, m)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// removeMembers deletes each member found in list, reporting whether list
+// changed.
+func removeMembers(list *[]string, members []string) bool {
+	changed := false
+	for _, m := range members {
+		if i := slices.Index(*list, m); i >= 0 {
+			*list = slices.Delete(*list, i, i+1)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// ACLPerms are the five standard Chef permissions, in the order Chef lists
+// them. The pseudo-permission "all" expands to this whole set.
+var ACLPerms = []string{"create", "read", "update", "delete", "grant"}
+
+// ExpandPerm turns a permission argument into the concrete permissions it
+// targets: "all" expands to every standard permission; a single valid
+// permission returns just itself; anything else is an error.
+func ExpandPerm(perm string) ([]string, error) {
+	if perm == "all" {
+		return slices.Clone(ACLPerms), nil
+	}
+	if slices.Contains(ACLPerms, perm) {
+		return []string{perm}, nil
+	}
+	return nil, fmt.Errorf("cinc: unknown permission %q — want one of create, read, update, delete, grant, or all", perm)
 }
 
 // ACL is the complete permission set for a Chef object — five ACEs, one per
@@ -17,6 +90,26 @@ type ACL struct {
 	Update ACE `json:"update"`
 	Delete ACE `json:"delete"`
 	Grant  ACE `json:"grant"`
+}
+
+// ACEFor returns a pointer to the ACE governing one permission, so a caller can
+// read or mutate it in place. perm must be one of the five standard
+// permissions; "all" and unknown values are an error.
+func (a *ACL) ACEFor(perm string) (*ACE, error) {
+	switch perm {
+	case "create":
+		return &a.Create, nil
+	case "read":
+		return &a.Read, nil
+	case "update":
+		return &a.Update, nil
+	case "delete":
+		return &a.Delete, nil
+	case "grant":
+		return &a.Grant, nil
+	default:
+		return nil, fmt.Errorf("cinc: unknown permission %q — want one of create, read, update, delete, or grant", perm)
+	}
 }
 
 // ACLsService accesses the per-object ACL endpoints. Every Chef object that

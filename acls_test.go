@@ -171,6 +171,97 @@ func TestACLs_SetUserPermission(t *testing.T) {
 	}
 }
 
+func TestExpandPerm(t *testing.T) {
+	all, err := ExpandPerm("all")
+	if err != nil {
+		t.Fatalf("ExpandPerm(all): %v", err)
+	}
+	if !reflect.DeepEqual(all, []string{"create", "read", "update", "delete", "grant"}) {
+		t.Errorf("ExpandPerm(all) = %v", all)
+	}
+	// The returned slice must be independent of the package var.
+	all[0] = "mutated"
+	if ACLPerms[0] != "create" {
+		t.Errorf("ExpandPerm(all) aliased ACLPerms: %v", ACLPerms)
+	}
+
+	one, err := ExpandPerm("read")
+	if err != nil {
+		t.Fatalf("ExpandPerm(read): %v", err)
+	}
+	if !reflect.DeepEqual(one, []string{"read"}) {
+		t.Errorf("ExpandPerm(read) = %v", one)
+	}
+
+	if _, err := ExpandPerm("bogus"); err == nil {
+		t.Error("ExpandPerm(bogus) should error")
+	}
+}
+
+func TestACL_ACEFor(t *testing.T) {
+	acl := &ACL{}
+	for _, perm := range ACLPerms {
+		ace, err := acl.ACEFor(perm)
+		if err != nil {
+			t.Fatalf("ACEFor(%s): %v", perm, err)
+		}
+		// The pointer must alias the struct field so mutations persist.
+		ace.Groups = append(ace.Groups, perm)
+	}
+	if !reflect.DeepEqual(acl.Create.Groups, []string{"create"}) ||
+		!reflect.DeepEqual(acl.Grant.Groups, []string{"grant"}) {
+		t.Errorf("ACEFor did not return field pointers: %+v", acl)
+	}
+	if _, err := acl.ACEFor("all"); err == nil {
+		t.Error(`ACEFor("all") should error — "all" is not a single ACE`)
+	}
+	if _, err := acl.ACEFor("bogus"); err == nil {
+		t.Error("ACEFor(bogus) should error")
+	}
+}
+
+func TestACE_AddMembers(t *testing.T) {
+	ace := &ACE{Actors: []string{"alice"}, Groups: []string{"admins"}}
+
+	// Adding a brand-new actor and group changes the ACE.
+	if !ace.AddMembers([]string{"bob"}, []string{"ops"}) {
+		t.Fatal("AddMembers should report a change")
+	}
+	if !reflect.DeepEqual(ace.Actors, []string{"alice", "bob"}) {
+		t.Errorf("actors = %v", ace.Actors)
+	}
+	if !reflect.DeepEqual(ace.Groups, []string{"admins", "ops"}) {
+		t.Errorf("groups = %v", ace.Groups)
+	}
+
+	// Re-adding existing members is a no-op (deduped).
+	if ace.AddMembers([]string{"alice", "bob"}, []string{"admins"}) {
+		t.Error("AddMembers of existing members should report no change")
+	}
+	if !reflect.DeepEqual(ace.Actors, []string{"alice", "bob"}) {
+		t.Errorf("actors after no-op add = %v", ace.Actors)
+	}
+}
+
+func TestACE_RemoveMembers(t *testing.T) {
+	ace := &ACE{Actors: []string{"alice", "bob"}, Groups: []string{"admins", "ops"}}
+
+	if !ace.RemoveMembers([]string{"bob"}, []string{"ops"}) {
+		t.Fatal("RemoveMembers should report a change")
+	}
+	if !reflect.DeepEqual(ace.Actors, []string{"alice"}) {
+		t.Errorf("actors = %v", ace.Actors)
+	}
+	if !reflect.DeepEqual(ace.Groups, []string{"admins"}) {
+		t.Errorf("groups = %v", ace.Groups)
+	}
+
+	// Removing absent members is a no-op.
+	if ace.RemoveMembers([]string{"carol"}, []string{"temps"}) {
+		t.Error("RemoveMembers of absent members should report no change")
+	}
+}
+
 func TestACLs_GetNotFound(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("GET /organizations/o/nodes/missing/_acl",
