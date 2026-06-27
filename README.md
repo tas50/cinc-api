@@ -30,7 +30,7 @@ following endpoint families are implemented:
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
 | `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
-| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD                |
+| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
@@ -72,6 +72,11 @@ model, so callers don't re-encode server conventions:
   `path`/`artifactserver`/`git`/`chef_server` and return its location) and
   `PinnedVersion()` (the `source_options` version, falling back to the lock's
   top-level version).
+- `DataBagItem.Encrypt(secret)` / `Decrypt(secret)` / `IsEncrypted()` — the
+  Chef encrypted-data-bag-item codec. `Encrypt` boxes every value except `id`
+  in a version-3 (AES-256-GCM) wrapper; `Decrypt` reads versions 1, 2, and 3
+  and is byte-for-byte compatible with knife/chef-client. The AES key is
+  `sha256(secret)`; values round-trip through Chef's `json_wrapper` boxing.
 - `Policies.PushRevision(lockJSON, group, cookbooks)` — the server-side half of
   `chef push`: upload each pinned cookbook as an artifact, then associate the
   revision with a policy group. The lock bytes are sent verbatim so no fields
